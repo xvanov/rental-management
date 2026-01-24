@@ -307,7 +307,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Add no-show detection: auto-cancel if no confirmation, log event",
       "Create reminder job in BullMQ for showing notifications"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

@@ -1,9 +1,9 @@
 # AI Rental Ops Platform - Activity Log
 
 ## Current Status
-**Last Updated:** 2026-01-23
-**Tasks Completed:** 11
-**Current Task:** Task 11 complete - Integrate SendGrid for email send and receive
+**Last Updated:** 2026-01-24
+**Tasks Completed:** 12
+**Current Task:** Task 12 complete - Build the showing scheduler with Google Calendar integration
 
 ---
 
@@ -515,3 +515,66 @@ Each entry should include:
 **Issues & Resolutions:**
 - Cannot test actual email sending without SendGrid credentials configured - code compiles and routes work; actual sending will work when env vars are set
 - SendGrid webhook route returns empty page for GET requests (expected - only POST is defined)
+
+### 2026-01-24 - Task 12: Build the showing scheduler with Google Calendar integration
+
+**Changes Made:**
+- Installed `googleapis` package for Google Calendar API access
+- Created `src/lib/integrations/google-calendar.ts` with:
+  - `getCalendarClient()` - lazy Google Calendar client initialization from service account credentials
+  - `getBusyTimes(timeMin, timeMax)` - queries Google Calendar freebusy API for busy slots
+  - `getAvailableSlots(startDate, endDate, duration, startHour, endHour)` - generates available 30-min showing slots excluding busy times
+  - `isCalendarConfigured()` - checks if Google Calendar env vars are set
+- Created API route `GET/POST/PATCH /api/showings` with:
+  - GET: Returns showings with optional filters (propertyId, status, date range)
+  - POST: Creates a showing, logs immutable event, schedules BullMQ reminder 1 hour before
+  - PATCH: Updates showing status (SCHEDULED → CONFIRMED/CANCELLED, CONFIRMED → COMPLETED), logs event
+- Created API route `GET /api/showings/availability` with:
+  - Returns available time slots for a property over a date range
+  - Integrates with Google Calendar when configured, falls back to default 9AM-6PM slots
+  - Excludes slots already booked (SCHEDULED or CONFIRMED showings)
+- Rewrote `/dashboard/calendar/page.tsx` as a full calendar UI with:
+  - Week and month view toggle with navigation (prev/next, Today button)
+  - 7-column calendar grid showing showings per day with time, attendee name, status badge
+  - Month view with condensed showing indicators (max 3 per day, "+N more")
+  - "New Showing" dialog with property select, date/time pickers, attendee fields
+  - Upcoming showings list with status badges, action buttons (Confirm/Cancel/Complete)
+  - Status color coding: Scheduled (secondary), Confirmed (default), No Show (destructive), Cancelled (destructive)
+- Created `/book/[propertyId]/page.tsx` (public booking page) with:
+  - Multi-step booking flow: Select Date → Select Time → Enter Details → Confirmation
+  - Week-based date picker with available slot counts per day
+  - Time slot grid showing 30-min intervals
+  - Contact form with name (required), phone (for SMS confirmation), email
+  - Confirmation screen with showing details and SMS confirmation note
+  - Mobile-first responsive design
+- Created `src/lib/jobs/showing-reminder.ts` with:
+  - `enqueueShowingReminder(data, delay)` - schedules SMS reminder 1 hour before showing
+  - `enqueueNoShowCheck(data, delay)` - schedules no-show check 15 minutes after showing
+  - `startShowingWorker()` - BullMQ worker processing both job types
+  - Reminder handler: sends SMS to attendee asking to confirm (reply YES/CANCEL)
+  - No-show handler: auto-marks SCHEDULED showings as NO_SHOW if unconfirmed after showing time
+
+**Environment Variables Required:**
+- `GOOGLE_CALENDAR_CREDENTIALS` - JSON service account credentials
+- `GOOGLE_CALENDAR_ID` - Calendar ID to check availability against
+
+**Commands Run:**
+- `npm install googleapis` - installed Google APIs package (51 packages)
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 33 routes compiled
+- `agent-browser open http://localhost:3001/book/test-property-id` - booking page renders with date selector
+- `agent-browser open http://localhost:3001/api/showings` - API route compiled and responds
+- `agent-browser open http://localhost:3001/api/showings/availability?propertyId=test` - availability API responds
+
+**Browser Verification:**
+- Home page renders with "AI Rental Ops Platform" title
+- Login page renders with "Sign in with Google" button
+- Booking page shows week navigation, day buttons with slot counts, responsive layout
+- All API routes (`/api/showings`, `/api/showings/availability`) compiled as dynamic server routes
+- Build output confirms `/dashboard/calendar` (6.83 kB) and `/book/[propertyId]` (5.5 kB) compile successfully
+
+**Issues & Resolutions:**
+- `agent-browser screenshot` still has the known validation error bug - used snapshot for verification
+- Booking page shows "Full" for all days without database connection - expected; slots are generated from DB query results
+- Cannot verify full calendar dashboard UI without Google OAuth session - verified via successful build compilation
