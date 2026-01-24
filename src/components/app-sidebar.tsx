@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   ClipboardList,
   FileText,
+  Zap,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -49,6 +50,7 @@ const navItems = [
   { title: "Leases", href: "/dashboard/leases", icon: FileText },
   { title: "Inbox", href: "/dashboard/inbox", icon: Inbox },
   { title: "Payments", href: "/dashboard/payments", icon: CreditCard },
+  { title: "Utilities", href: "/dashboard/utilities", icon: Zap },
   { title: "Enforcement", href: "/dashboard/enforcement", icon: ShieldAlert },
   { title: "Calendar", href: "/dashboard/calendar", icon: Calendar },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },

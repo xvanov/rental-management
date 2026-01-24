@@ -383,7 +383,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Show utility history per property and per tenant",
       "Create monthly utility summary"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

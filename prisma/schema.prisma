@@ -73,9 +73,10 @@ model Property {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  units    Unit[]
-  showings Showing[]
-  events   Event[]
+  units        Unit[]
+  showings     Showing[]
+  events       Event[]
+  utilityBills UtilityBill[]
 }
 
 enum UnitStatus {
@@ -404,6 +405,27 @@ model Application {
 
   @@index([tenantId])
   @@index([status])
+}
+
+// ─── Utility Bill ─────────────────────────────────────────────────────────
+
+model UtilityBill {
+  id           String   @id @default(cuid())
+  propertyId   String
+  provider     String
+  type         String   // electric, gas, water, internet, trash, etc.
+  amount       Float
+  billingStart DateTime
+  billingEnd   DateTime
+  period       String   // "YYYY-MM" for the billing period
+  allocated    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+  @@index([period])
 }
 
 // ─── Cleaning Assignment ───────────────────────────────────────────────────
