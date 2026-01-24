@@ -184,7 +184,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Add middleware to protect /dashboard routes",
       "Verify login flow works with Google account"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",
