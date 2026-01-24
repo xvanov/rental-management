@@ -236,7 +236,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Show unit status (vacant, occupied, maintenance)",
       "Add property-level stats (occupancy rate, total revenue)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

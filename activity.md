@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 6
-**Current Task:** Task 6 complete - Build the operator dashboard shell with sidebar navigation
+**Tasks Completed:** 7
+**Current Task:** Task 7 complete - Build property and unit management pages
 
 ---
 
@@ -263,3 +263,49 @@ Each entry should include:
 **Issues & Resolutions:**
 - Cannot verify full sidebar UI in browser without Google OAuth session - verified via successful build (all routes compile, layout applied)
 - `agent-browser open` to /dashboard causes connection refused due to middleware redirect - confirmed middleware is working correctly from dev server logs showing compiled middleware and session checks
+
+### 2026-01-23 - Task 7: Build property and unit management pages
+
+**Changes Made:**
+- Installed Shadcn components: Card, Dialog, Badge, Label, Select (plus dependencies)
+- Created API route `GET/POST /api/properties` with:
+  - GET: Returns all properties with units and active tenants included
+  - POST: Creates a new property with address, city, state, zip, jurisdiction validation
+- Created API route `POST/PATCH /api/units` with:
+  - POST: Creates a unit linked to a property with name and optional rentAmount
+  - PATCH: Updates unit name, status, and rentAmount
+- Rewrote `/dashboard/properties/page.tsx` as a client component with:
+  - Property card grid layout (responsive: 1/2/3 columns)
+  - Each card shows address, location, unit count, occupancy rate badge, monthly revenue
+  - Cards link to property detail page
+  - Empty state with icon when no properties exist
+  - "Add Property" button opening a dialog form
+  - Create property form with address, city/state/zip, and jurisdiction fields
+- Created `/dashboard/properties/[id]/page.tsx` (property detail page) with:
+  - Back navigation link to properties list
+  - Property header with address and location info
+  - 4 stat cards: Total Units, Occupancy Rate, Monthly Revenue, Maintenance count
+  - Units section with card grid showing each unit
+  - Unit cards display: name, status badge (Vacant/Occupied/Maintenance with color coding), rent amount, tenant names
+  - "Add Unit" dialog with name and rent amount fields
+  - "Edit Unit" dialog with name, status select dropdown, and rent amount
+  - Status uses Badge variants: secondary (vacant), default (occupied), destructive (maintenance)
+
+**Commands Run:**
+- `npx shadcn@latest add card dialog badge label select -y` - installed UI components
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 19 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders correctly
+- `agent-browser open http://localhost:3001/api/properties` - API route responds (500 expected without DB)
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- Dashboard middleware correctly redirects unauthenticated users to /login
+- Build output confirms `/dashboard/properties` (4.47 kB) and `/dashboard/properties/[id]` (13.3 kB) compile successfully
+- API routes `/api/properties` and `/api/units` compiled as dynamic server routes
+
+**Issues & Resolutions:**
+- `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
+- Cannot verify full dashboard UI without Google OAuth session - verified via successful build compilation
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
