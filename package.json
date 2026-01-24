@@ -35,6 +35,7 @@
     "lucide-react": "^0.563.0",
     "next": "^15.1.0",
     "next-auth": "^5.0.0-beta.30",
+    "puppeteer": "^24.36.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.4.0",

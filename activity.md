@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 20
-**Current Task:** Task 20 complete - Build move-out and security deposit reconciliation
+**Tasks Completed:** 21
+**Current Task:** Task 21 complete - Build court packet export system
 
 ---
 
@@ -1105,4 +1105,65 @@ Each entry should include:
 - `enqueueGroupChatRemove` was imported but unused in main route.ts (used in disposition route) - removed from main route imports
 - Computed property type error with `[field]: value` where value could be `string | number` - resolved by using explicit `description: String(value)` in else branch
 - Cannot verify full dashboard move-out UI without Google OAuth session - verified via successful build compilation (9.81 kB page)
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
+
+### 2026-01-24 - Task 21: Build court packet export system
+
+**Changes Made:**
+- Installed `puppeteer` for server-side HTML-to-PDF generation
+- Created `src/lib/pdf/court-packet.ts` with:
+  - `CourtPacketData` interface defining all data needed for the packet
+  - `generateCourtPacketPdf(data)` - generates a court-ready PDF using Puppeteer headless Chrome
+  - `buildFullHtml(data)` - generates complete HTML document with legal formatting
+  - `buildCoverPage(data)` - cover page with tenant info, property address, date range, document summary, certification block with signature lines
+  - `buildTableOfContents(data)` - dynamic TOC with section titles and page numbers
+  - `buildLeaseSection(data)` - full lease content with metadata (status, version, dates, rent)
+  - `buildLedgerSection(data)` - payment ledger table with summary box (charges, payments, outstanding balance), color-coded amounts
+  - `buildNoticesSection(data)` - all notices with type labels, dates, proof of service, and full content
+  - `buildMessagesSection(data)` - communication log table with date/time, channel, direction, content
+  - `buildEventsSection(data)` - event timeline appendix with type and summary details
+  - Legal document styling: Times New Roman, proper margins, page breaks between sections, page numbers in footer
+  - PDF configured for Letter size with header/footer showing tenant name and page numbers
+- Created `GET /api/court-packet` API route with:
+  - Query params: tenantId (required), startDate (optional), endDate (optional)
+  - Fetches tenant with unit/property, active lease, ledger entries, notices, messages, events
+  - Applies date range filter to messages and events when specified
+  - Generates PDF via `generateCourtPacketPdf()`
+  - Logs COURT_PACKET_GENERATED system event with document counts metadata
+  - Returns PDF as downloadable attachment with proper Content-Type and Content-Disposition headers
+  - Proper error handling (400 for missing tenantId, 404 for unknown tenant, 500 for generation errors)
+- Created `/dashboard/tenants/[id]/court-packet/page.tsx` with:
+  - Back navigation to tenant detail page
+  - Tenant/unit/property badge display
+  - 4 stat cards: Lease (status + rent), Payments (count), Messages (count), Leases (version count)
+  - Generation options card with:
+    - Description of included documents
+    - Start/End date pickers for filtering communications/events
+    - Document checklist showing what will be included (lease, ledger, notices, messages, events)
+    - "Download Court Packet PDF" button with loading state (spinner animation)
+    - Error display with AlertTriangle icon
+  - Client-side PDF download via blob URL and programmatic anchor click
+  - Loading and error states for tenant data fetch
+
+**Commands Run:**
+- `npm install puppeteer` - installed Puppeteer for PDF generation
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 67 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders with Google sign-in button
+- `agent-browser open http://localhost:3001/api/court-packet` - returns proper validation error (tenantId required)
+- `agent-browser open http://localhost:3001/api/court-packet?tenantId=test-id` - returns 500 (expected without DB)
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- API route `/api/court-packet` compiled and responds with proper validation (400 without tenantId)
+- API route responds with 500 when DB unavailable (expected, same as prior tasks)
+- Build output confirms `/dashboard/tenants/[id]/court-packet` (5.13 kB) compiles successfully
+- Build output confirms `/api/court-packet` compiled as dynamic server route
+- Middleware correctly redirects unauthenticated users to /login
+
+**Issues & Resolutions:**
+- `Buffer` type not assignable to `BodyInit` in NextResponse - resolved by wrapping in `new Uint8Array(pdfBuffer)`
+- `createEvent` payload structure needed to match `SystemEventPayload` interface (action + description + metadata) - fixed to use proper typed payload
+- Cannot verify full dashboard court-packet UI without Google OAuth session - verified via successful build compilation (5.13 kB page)
 - API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered

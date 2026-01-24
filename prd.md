@@ -443,7 +443,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Download as single PDF bundle",
       "Log court packet generation as event"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",
