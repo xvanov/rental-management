@@ -18,6 +18,7 @@ import {
   FileText,
   Zap,
   Sparkles,
+  Home,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -55,6 +56,7 @@ const navItems = [
   { title: "Cleaning", href: "/dashboard/cleaning", icon: Sparkles },
   { title: "Enforcement", href: "/dashboard/enforcement", icon: ShieldAlert },
   { title: "Calendar", href: "/dashboard/calendar", icon: Calendar },
+  { title: "Move-In", href: "/dashboard/move-in", icon: Home },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

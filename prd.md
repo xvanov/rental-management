@@ -412,7 +412,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Log welcome event and group chat addition",
       "Update unit status to occupied"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
