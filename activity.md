@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 12
-**Current Task:** Task 12 complete - Build the showing scheduler with Google Calendar integration
+**Tasks Completed:** 13
+**Current Task:** Task 13 complete - Build tenant application form and review workflow
 
 ---
 
@@ -578,3 +578,62 @@ Each entry should include:
 - `agent-browser screenshot` still has the known validation error bug - used snapshot for verification
 - Booking page shows "Full" for all days without database connection - expected; slots are generated from DB query results
 - Cannot verify full calendar dashboard UI without Google OAuth session - verified via successful build compilation
+
+### 2026-01-24 - Task 13: Build tenant application form and review workflow
+
+**Changes Made:**
+- Created API route `GET/POST/PATCH /api/applications` with:
+  - GET: Returns all applications (with status filter) or single application by token (for public form)
+  - POST: Creates a new application with unique token, logs immutable event
+  - PATCH: Updates application data (form submission or status change), handles status transitions
+  - Auto-transitions PENDING → UNDER_REVIEW when form data is submitted
+  - Logs APPLICATION events for all status changes
+- Created API route `POST /api/applications/send-link` with:
+  - Sends application link to prospect via SMS (Twilio) or Email (SendGrid)
+  - Generates full URL from application token
+  - Logs SYSTEM event for tracking
+- Created `/apply/[token]/page.tsx` (public multi-step application form) with:
+  - 5-step wizard: Identity → Rental History → Employment → Documents → Review
+  - Step indicator with navigation (click any completed step to go back)
+  - Identity step: firstName (required), lastName (required), email, phone, currentAddress
+  - Rental History step: dynamic list of previous residences (add/remove), eviction history with details textarea
+  - Employment step: employer, monthly income
+  - Documents step: file upload (PDF, JPG, PNG, max 10MB per file) with DataURL encoding, file list with remove
+  - Review step: summary of all sections with background check consent notice
+  - Submitted confirmation page with application details
+  - Error state for invalid/expired tokens
+  - Pre-fills form if partial data already exists
+  - Mobile-first responsive design
+- Created `/dashboard/applications/page.tsx` (review workflow) with:
+  - Stats cards: Total, Pending, Under Review, Approved, Rejected
+  - Search by name/email/phone
+  - Status filter buttons (All, Pending, Under Review, Approved, Rejected)
+  - Applications table with applicant name, contact, status badge, submission date, actions
+  - "New Application Link" button to generate unique token with copy-to-clipboard
+  - Application detail/review dialog with all submitted information displayed
+  - Approve/Reject action buttons with review notes textarea
+  - Copy application link button per row
+  - Status badges with color coding and icons
+- Added "Applications" nav item to sidebar (with ClipboardList icon) between Tenants and Inbox
+
+**Commands Run:**
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 37 routes compiled
+- `agent-browser open http://localhost:3001/apply/test-token` - application form renders with multi-step UI
+- `agent-browser open http://localhost:3001/api/applications` - API route compiled and responds
+- `agent-browser open http://localhost:3001/login` - login page renders correctly
+
+**Browser Verification:**
+- Application form renders with step navigation (Identity, Rental History, Employment, Documents, Review)
+- Form fields display correctly with labels, placeholders, and required indicators
+- Next button disabled until required fields filled
+- Login page renders with "Sign in with Google" button
+- Dashboard middleware correctly redirects unauthenticated users to /login
+- Build output confirms `/apply/[token]` (7.66 kB) and `/dashboard/applications` (6.84 kB) compile successfully
+- API routes `/api/applications` and `/api/applications/send-link` compiled as dynamic server routes
+
+**Issues & Resolutions:**
+- `agent-browser screenshot` still has the known validation error bug - used snapshot for verification
+- Cannot verify full dashboard applications UI without Google OAuth session - verified via successful build compilation
+- Application form shows identity step even for invalid token when no DB is connected (500 error from API) - in production with DB, 404 will correctly show error state

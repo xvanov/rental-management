@@ -14,6 +14,7 @@ import {
   Settings,
   LogOut,
   ChevronsUpDown,
+  ClipboardList,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -43,6 +44,7 @@ const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Properties", href: "/dashboard/properties", icon: Building2 },
   { title: "Tenants", href: "/dashboard/tenants", icon: Users },
+  { title: "Applications", href: "/dashboard/applications", icon: ClipboardList },
   { title: "Inbox", href: "/dashboard/inbox", icon: Inbox },
   { title: "Payments", href: "/dashboard/payments", icon: CreditCard },
   { title: "Enforcement", href: "/dashboard/enforcement", icon: ShieldAlert },

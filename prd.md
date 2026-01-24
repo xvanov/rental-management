@@ -322,7 +322,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Show application details with uploaded documents",
       "Add approve/reject actions with event logging"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
