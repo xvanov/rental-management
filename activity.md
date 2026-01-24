@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 21
-**Current Task:** Task 21 complete - Build court packet export system
+**Tasks Completed:** 22
+**Current Task:** Task 22 complete - Integrate AI for message drafting and classification
 
 ---
 
@@ -1167,3 +1167,74 @@ Each entry should include:
 - `createEvent` payload structure needed to match `SystemEventPayload` interface (action + description + metadata) - fixed to use proper typed payload
 - Cannot verify full dashboard court-packet UI without Google OAuth session - verified via successful build compilation (5.13 kB page)
 - API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
+
+### 2026-01-24 - Task 22: Integrate AI for message drafting and classification
+
+**Changes Made:**
+- Installed `ai`, `@ai-sdk/openai`, `@ai-sdk/anthropic`, and `zod` packages
+- Created `src/lib/ai/provider.ts` with:
+  - `getOpenAIProvider()` - lazy OpenAI client initialization from OPENAI_API_KEY env var
+  - `getAnthropicProvider()` - lazy Anthropic client initialization from ANTHROPIC_API_KEY env var
+  - `getLanguageModel()` - returns configured model (prefers OpenAI gpt-4o-mini, falls back to Anthropic claude-3-haiku)
+  - `isAIConfigured()` - checks if any AI provider is configured
+- Created `src/lib/ai/classify.ts` with:
+  - `MESSAGE_CATEGORIES` - 7 category types: inquiry, complaint, payment_confirmation, maintenance_request, lease_question, move_in_out, general
+  - `classifyMessage(content, context)` - uses `generateObject` with structured zod schema to classify messages
+  - Returns category, confidence score (0-1), and one-sentence summary
+  - Context-aware: accepts tenant name, unit, and property address for better classification
+- Created `src/lib/ai/draft.ts` with:
+  - `ConversationMessage` and `DraftContext` interfaces for typed context
+  - `generateDraftReply(context)` - generates streaming draft reply using `streamText`
+  - System prompt with property management guidelines (professional tone, no legal advice, concise for SMS)
+  - Context-aware: uses tenant info, lease status, rent amount, balance, and full conversation history
+  - Returns streaming response for real-time display in UI
+- Created `src/lib/ai/index.ts` - barrel export for all AI utilities
+- Created `POST /api/ai/draft` API route:
+  - Fetches tenant with unit, property, lease, and balance data
+  - Gets last 20 messages for conversation context
+  - Generates streaming AI draft reply
+  - Logs AI_DRAFT_GENERATED system event
+  - Returns 503 if no AI provider configured (graceful degradation)
+- Created `POST /api/ai/classify` API route:
+  - Accepts messageId, content, and optional tenantId
+  - Fetches tenant context if tenantId provided
+  - Returns structured classification (category, confidence, summary)
+  - Logs AI_MESSAGE_CLASSIFIED system event with metadata
+  - Returns 503 if no AI provider configured
+- Updated `/dashboard/inbox` page (9.25 kB -> 10.5 kB) with:
+  - "Suggest Reply" button (Sparkles icon) in compose area
+  - Streaming AI draft display panel between messages and compose area
+  - PM approval step: "Use This Reply" / "Discard" buttons on completed draft
+  - "Use This Reply" copies draft to compose textarea for review/edit before sending
+  - "Classify" button in conversation header for message classification
+  - Classification result banner showing category badge, confidence percentage, and summary
+  - CategoryBadge component with color-coded variants per category type
+  - All AI actions are non-blocking (PM must explicitly approve drafts before sending)
+  - Loading states with spinner animations for draft generation and classification
+
+**Environment Variables Required:**
+- `OPENAI_API_KEY` - OpenAI API key (primary provider)
+- `ANTHROPIC_API_KEY` - Anthropic API key (fallback provider)
+- `AI_MODEL` - Optional model override (default: gpt-4o-mini for OpenAI, claude-3-haiku for Anthropic)
+
+**Commands Run:**
+- `npm install ai @ai-sdk/openai @ai-sdk/anthropic` - installed Vercel AI SDK with providers (10 packages)
+- `npm install zod` - installed schema validation for generateObject
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 69 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders with Google sign-in button
+- `agent-browser open http://localhost:3001/api/ai/classify` - API route compiled and responds
+- `agent-browser open http://localhost:3001/api/ai/draft` - API route compiled and responds
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- API routes `/api/ai/classify` and `/api/ai/draft` compiled as dynamic server routes
+- Build output confirms `/dashboard/inbox` (10.5 kB) compiles successfully
+- Middleware correctly redirects unauthenticated users to /login
+
+**Issues & Resolutions:**
+- `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
+- Initial draft route used `tenant.unit.unitId` which doesn't exist - fixed to use `tenant.unit?.propertyId` with proper select in Prisma query
+- Cannot verify full inbox AI features without Google OAuth session and AI API keys - verified via successful build compilation (10.5 kB page)
+- AI endpoints return 503 gracefully when no API keys configured - production will work when env vars are set

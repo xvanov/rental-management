@@ -8,6 +8,11 @@ import {
   Phone,
   Send,
   ArrowLeft,
+  Sparkles,
+  Loader2,
+  Check,
+  X,
+  Tag,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +65,12 @@ interface Message {
   } | null;
 }
 
+interface Classification {
+  category: string;
+  confidence: number;
+  summary: string;
+}
+
 function ChannelIcon({ channel }: { channel: string }) {
   switch (channel) {
     case "SMS":
@@ -83,6 +94,33 @@ function ChannelBadge({ channel }: { channel: string }) {
   );
 }
 
+function CategoryBadge({ category }: { category: string }) {
+  const labels: Record<string, string> = {
+    inquiry: "Inquiry",
+    complaint: "Complaint",
+    payment_confirmation: "Payment",
+    maintenance_request: "Maintenance",
+    lease_question: "Lease",
+    move_in_out: "Move In/Out",
+    general: "General",
+  };
+  const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    inquiry: "secondary",
+    complaint: "destructive",
+    payment_confirmation: "default",
+    maintenance_request: "outline",
+    lease_question: "secondary",
+    move_in_out: "outline",
+    general: "secondary",
+  };
+  return (
+    <Badge variant={variants[category] ?? "secondary"} className="gap-1 text-xs">
+      <Tag className="size-3" />
+      {labels[category] ?? category}
+    </Badge>
+  );
+}
+
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
@@ -92,6 +130,11 @@ export default function InboxPage() {
   const [newMessage, setNewMessage] = useState("");
   const [selectedChannel, setSelectedChannel] = useState<string>("SMS");
   const [sending, setSending] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [aiDraft, setAiDraft] = useState("");
+  const [showDraftApproval, setShowDraftApproval] = useState(false);
+  const [classification, setClassification] = useState<Classification | null>(null);
+  const [classifying, setClassifying] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = useCallback(async () => {
@@ -110,6 +153,7 @@ export default function InboxPage() {
 
   const fetchMessages = useCallback(async (tenantId: string) => {
     setMessagesLoading(true);
+    setClassification(null);
     try {
       const res = await fetch(`/api/messages?tenantId=${tenantId}`);
       if (res.ok) {
@@ -164,12 +208,102 @@ export default function InboxPage() {
 
       if (res.ok) {
         setNewMessage("");
+        setShowDraftApproval(false);
+        setAiDraft("");
         fetchMessages(selectedTenantId);
       }
     } catch (error) {
       console.error("Failed to send message:", error);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleSuggestReply = async () => {
+    if (!selectedTenantId) return;
+
+    setDraftLoading(true);
+    setAiDraft("");
+    setShowDraftApproval(false);
+
+    try {
+      const res = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: selectedTenantId }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error("AI draft error:", errorData.error);
+        setDraftLoading(false);
+        return;
+      }
+
+      // Stream the response
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setDraftLoading(false);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let draft = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        draft += chunk;
+        setAiDraft(draft);
+      }
+
+      setShowDraftApproval(true);
+    } catch (error) {
+      console.error("Failed to generate AI draft:", error);
+    } finally {
+      setDraftLoading(false);
+    }
+  };
+
+  const handleApproveDraft = () => {
+    setNewMessage(aiDraft);
+    setShowDraftApproval(false);
+    setAiDraft("");
+  };
+
+  const handleRejectDraft = () => {
+    setShowDraftApproval(false);
+    setAiDraft("");
+  };
+
+  const handleClassifyLatest = async () => {
+    if (!selectedTenantId || messages.length === 0) return;
+
+    // Find the latest inbound message
+    const latestInbound = [...messages].reverse().find((m) => m.direction === "INBOUND");
+    if (!latestInbound) return;
+
+    setClassifying(true);
+    try {
+      const res = await fetch("/api/ai/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId: latestInbound.id,
+          content: latestInbound.content,
+          tenantId: selectedTenantId,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setClassification(data);
+      }
+    } catch (error) {
+      console.error("Failed to classify message:", error);
+    } finally {
+      setClassifying(false);
     }
   };
 
@@ -298,12 +432,44 @@ export default function InboxPage() {
                     )}
                   </div>
                 </div>
-                {selectedConversation.unit && (
-                  <Badge variant="outline" className="text-xs">
-                    {selectedConversation.unit.name}
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {classification && (
+                    <CategoryBadge category={classification.category} />
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClassifyLatest}
+                    disabled={classifying || messages.length === 0}
+                    className="gap-1.5"
+                  >
+                    {classifying ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Tag className="size-3" />
+                    )}
+                    Classify
+                  </Button>
+                  {selectedConversation.unit && (
+                    <Badge variant="outline" className="text-xs">
+                      {selectedConversation.unit.name}
+                    </Badge>
+                  )}
+                </div>
               </div>
+
+              {/* Classification result */}
+              {classification && (
+                <div className="border-b bg-muted/30 px-4 py-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Tag className="size-3" />
+                    <span className="font-medium">AI Classification:</span>
+                    <CategoryBadge category={classification.category} />
+                    <span>({Math.round(classification.confidence * 100)}% confidence)</span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{classification.summary}</p>
+                </div>
+              )}
 
               {/* Messages */}
               <ScrollArea className="flex-1 p-4">
@@ -349,6 +515,44 @@ export default function InboxPage() {
                 )}
               </ScrollArea>
 
+              {/* AI Draft Approval */}
+              {(draftLoading || showDraftApproval) && (
+                <div className="border-t bg-muted/30 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="size-4 text-primary" />
+                    <span className="text-sm font-medium">AI Suggested Reply</span>
+                    {draftLoading && <Loader2 className="size-3 animate-spin" />}
+                  </div>
+                  <div className="rounded-md border bg-background p-3 text-sm whitespace-pre-wrap">
+                    {aiDraft || "Generating..."}
+                  </div>
+                  {showDraftApproval && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleApproveDraft}
+                        className="gap-1.5"
+                      >
+                        <Check className="size-3" />
+                        Use This Reply
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleRejectDraft}
+                        className="gap-1.5"
+                      >
+                        <X className="size-3" />
+                        Discard
+                      </Button>
+                      <p className="ml-auto text-xs text-muted-foreground">
+                        Review before sending - edit in compose area if needed.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Compose Area */}
               <div className="border-t p-3">
                 <div className="flex items-end gap-2">
@@ -377,19 +581,34 @@ export default function InboxPage() {
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                  <Textarea
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder="Type a message..."
-                    className="min-h-[2.5rem] max-h-32 resize-none"
-                    rows={1}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                  />
+                  <div className="flex flex-1 flex-col gap-1">
+                    <Textarea
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder="Type a message..."
+                      className="min-h-[2.5rem] max-h-32 resize-none"
+                      rows={1}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleSuggestReply}
+                    disabled={draftLoading || messages.length === 0}
+                    title="Suggest AI Reply"
+                  >
+                    {draftLoading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
+                  </Button>
                   <Button
                     size="icon"
                     onClick={handleSendMessage}
