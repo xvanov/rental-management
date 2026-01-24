@@ -250,7 +250,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Add communication history tab",
       "Add manual tenant creation form"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 7
-**Current Task:** Task 7 complete - Build property and unit management pages
+**Tasks Completed:** 8
+**Current Task:** Task 8 complete - Build tenant management and detail pages
 
 ---
 
@@ -304,6 +304,53 @@ Each entry should include:
 - Dashboard middleware correctly redirects unauthenticated users to /login
 - Build output confirms `/dashboard/properties` (4.47 kB) and `/dashboard/properties/[id]` (13.3 kB) compile successfully
 - API routes `/api/properties` and `/api/units` compiled as dynamic server routes
+
+**Issues & Resolutions:**
+- `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
+- Cannot verify full dashboard UI without Google OAuth session - verified via successful build compilation
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
+
+### 2026-01-23 - Task 8: Build tenant management and detail pages
+
+**Changes Made:**
+- Installed Shadcn `table` and `tabs` components for tenant list and detail views
+- Created API route `GET/POST /api/tenants` with:
+  - GET: Returns all active tenants with search (name/email/phone), includes unit/property, active leases, and latest payment
+  - GET with `?id=X`: Returns single tenant with full relations (unit, leases, payments, messages)
+  - POST: Creates a new tenant with firstName, lastName, optional email/phone/unitId
+- Created API route `GET /api/tenants/[id]/events` with:
+  - Returns paginated events for a tenant (limit/offset query params)
+  - Returns total count for pagination
+- Rewrote `/dashboard/tenants/page.tsx` as a client component with:
+  - 3 stat cards: Total Tenants, Active Leases, Assigned to Unit
+  - Search form with icon, searches by name/email/phone
+  - Data table with columns: Name (linked to detail), Contact (email/phone), Unit assignment, Lease status badge, Last Payment
+  - "Add Tenant" button opening a dialog form with firstName, lastName, email, phone, and unit assignment (vacant units only)
+  - Empty state with icon when no tenants exist
+  - Loading state
+- Created `/dashboard/tenants/[id]/page.tsx` (tenant detail page) with:
+  - Back navigation link to tenants list
+  - Tenant header with name, contact info, unit assignment, active/inactive badge
+  - 4 stat cards: Lease Status (with rent amount), Total Paid, Messages count, Member Since
+  - Tabbed interface with 4 tabs:
+    - **Timeline**: Chronological event feed with type badges (Message, Payment, Notice, Violation, etc.) and descriptive text
+    - **Leases**: Table with status badge, rent amount, start/end dates, version
+    - **Payments**: Table with date, amount, method, note
+    - **Communications**: Chat-style message display with channel badge, direction, timestamp, indented outbound messages
+
+**Commands Run:**
+- `npx shadcn@latest add table tabs -y` - installed table and tabs components
+- `npm run lint` - passed (fixed 2 unused import warnings)
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 21 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders with Google sign-in button
+- `agent-browser open http://localhost:3001/api/tenants` - API route compiled and responded (500 expected without DB)
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- Dashboard middleware correctly redirects unauthenticated users to /login
+- Build output confirms `/dashboard/tenants` (5.72 kB) and `/dashboard/tenants/[id]` (7.59 kB) compile successfully
+- API routes `/api/tenants` and `/api/tenants/[id]/events` compiled as dynamic server routes
 
 **Issues & Resolutions:**
 - `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
