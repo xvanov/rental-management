@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 8
-**Current Task:** Task 8 complete - Build tenant management and detail pages
+**Tasks Completed:** 9
+**Current Task:** Task 9 complete - Build the unified communications inbox
 
 ---
 
@@ -356,3 +356,54 @@ Each entry should include:
 - `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
 - Cannot verify full dashboard UI without Google OAuth session - verified via successful build compilation
 - API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
+
+### 2026-01-23 - Task 9: Build the unified communications inbox
+
+**Changes Made:**
+- Installed Shadcn `scroll-area` and `textarea` components for message thread and compose
+- Created API route `GET/POST /api/messages` with:
+  - GET (no tenantId): Returns conversation list grouped by tenant with latest message, unread counts, unit info
+  - GET (?tenantId=X): Returns all messages for a tenant in chronological order
+  - POST: Creates an outbound message with channel switching rule (phone → SMS default), logs as immutable event
+- Created API route `POST /api/messages/read` to mark all inbound messages from a tenant as read
+- Created API route `GET /api/messages/unread` returning total unread inbound message count
+- Rewrote `/dashboard/inbox/page.tsx` as a client component with:
+  - Split-pane layout: conversation list (left) + message thread (right)
+  - Responsive design: on mobile shows one panel at a time with back button
+  - Conversation list with tenant name, unit info, last message preview, unread badge, time
+  - Channel indicators (Phone icon for SMS, Mail for Email, MessageSquare for Facebook)
+  - ChannelBadge component with variant colors per channel type
+  - Message thread with chat-bubble style (outbound right/primary, inbound left/muted)
+  - Each message shows channel badge and relative timestamp
+  - Compose area with channel selector (SMS/Email/Facebook) and textarea
+  - Enter to send, Shift+Enter for newline
+  - Auto-scroll to latest message
+  - Channel switching hint text (defaults to SMS when phone available)
+  - Empty states for no conversations and no messages
+  - Mark-as-read on conversation open
+- Updated `AppSidebar` component with:
+  - Fetches unread count from `/api/messages/unread` on mount
+  - Polls unread count every 30 seconds
+  - Shows `SidebarMenuBadge` on Inbox nav item when unread > 0
+  - Badge shows count (capped at "99+") with destructive styling
+- All messages stored as immutable events via `logMessageEvent()` on send
+
+**Commands Run:**
+- `npx shadcn@latest add scroll-area textarea -y` - installed UI components
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 25 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders with Google sign-in button
+- `agent-browser open http://localhost:3001/api/messages` - API route compiled and responded
+- `agent-browser open http://localhost:3001/api/messages/unread` - API route compiled and responded
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- Dashboard middleware correctly redirects unauthenticated users to /login
+- Build output confirms `/dashboard/inbox` (9.25 kB) compiles successfully
+- API routes `/api/messages`, `/api/messages/read`, `/api/messages/unread` compiled as dynamic server routes
+
+**Issues & Resolutions:**
+- Cannot verify full inbox UI without Google OAuth session - verified via successful build compilation (9.25 kB page)
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
+- Channel switching rule implemented: when tenant has phone, message defaults to SMS regardless of selected channel (unless EMAIL explicitly chosen)

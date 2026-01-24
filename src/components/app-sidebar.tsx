@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -25,6 +26,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -51,6 +53,25 @@ const navItems = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/messages/unread");
+      if (res.ok) {
+        const data = await res.json();
+        setUnreadCount(data.count);
+      }
+    } catch {
+      // Silently fail - unread count is non-critical
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUnreadCount();
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCount]);
 
   const user = session?.user;
   const initials = user?.name
@@ -104,6 +125,11 @@ export function AppSidebar() {
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {item.title === "Inbox" && unreadCount > 0 && (
+                      <SidebarMenuBadge className="bg-destructive text-destructive-foreground">
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </SidebarMenuBadge>
+                    )}
                   </SidebarMenuItem>
                 );
               })}

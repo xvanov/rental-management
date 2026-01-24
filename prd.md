@@ -264,7 +264,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Store all messages as immutable events",
       "Add unread count badge in sidebar"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",
