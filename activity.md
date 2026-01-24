@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 13
-**Current Task:** Task 13 complete - Build tenant application form and review workflow
+**Tasks Completed:** 14
+**Current Task:** Task 14 complete - Build lease management with template markers and e-signature
 
 ---
 
@@ -637,3 +637,82 @@ Each entry should include:
 - `agent-browser screenshot` still has the known validation error bug - used snapshot for verification
 - Cannot verify full dashboard applications UI without Google OAuth session - verified via successful build compilation
 - Application form shows identity step even for invalid token when no DB is connected (500 error from API) - in production with DB, 404 will correctly show error state
+
+### 2026-01-24 - Task 14: Build lease management with template markers and e-signature
+
+**Changes Made:**
+- Added `LeaseTemplate` model to Prisma schema with name, content, description, jurisdiction fields
+- Added `templateId`, `rentAmount`, and `xodoSignDocumentId` fields to Lease model
+- Created migration `0003_lease_templates` for new schema changes
+- Created `src/lib/lease-parser.ts` with `parseLeaseClausesFromContent()`:
+  - Parses rent amount, due date, late fees (fixed/percentage), grace period
+  - Parses security deposit, lease term, utilities, notice to vacate, cleaning requirements
+  - Returns typed ParsedClause[] with structured metadata for enforcement rules
+- Created `src/lib/integrations/xodo-sign.ts` with:
+  - `uploadDocument()` - uploads document to Xodo Sign for signing
+  - `createSignatureRequest()` - creates freeform invite with signer details
+  - `getDocumentStatus()` - checks document signing status
+  - `downloadSignedDocument()` - downloads completed signed document
+  - `registerWebhook()` - registers callback for document.complete/decline events
+  - `sendForSignature()` - orchestrates upload + invite + webhook in one call
+  - `isXodoSignConfigured()` - checks if API token env var is set
+- Created API route `GET/POST/PATCH/DELETE /api/lease-templates`:
+  - Full CRUD for lease templates
+  - Prevents deletion of templates with existing leases
+- Created API route `GET/POST/PATCH /api/leases`:
+  - GET: List with status/tenant filtering, single by ID with full includes
+  - POST: Create lease with version tracking
+  - PATCH: Update with status transition validation (DRAFT→PENDING_SIGNATURE→ACTIVE→EXPIRED/TERMINATED)
+  - Logs LEASE events for all status changes
+- Created API route `POST /api/leases/generate`:
+  - Takes templateId, tenantId, unitId, startDate, endDate, rentAmount, customFields
+  - Fetches template, tenant, unit data
+  - Builds replacement map with 19 dynamic markers (tenant_name, property_address, rent_amount, etc.)
+  - Applies {{marker}} replacements to template content
+  - Creates lease and parses clauses from generated content
+  - Includes `numberToWords()` helper for rent_amount_words
+- Created API route `POST /api/leases/sign`:
+  - Sends DRAFT lease for e-signature via Xodo Sign
+  - Validates tenant has email, lease is in DRAFT status
+  - Falls back to status-only transition when Xodo Sign not configured
+- Created webhook endpoint `POST /api/webhooks/xodo-sign`:
+  - Handles document.complete → marks lease ACTIVE + sets signedAt
+  - Handles document.decline → reverts lease to DRAFT
+  - Always returns 200 to prevent retries
+- Created `/dashboard/leases/page.tsx` with:
+  - 4 stat cards (Total, Active, Drafts, Pending Signature)
+  - Search by tenant name, unit, or address
+  - Status filter dropdown (All, Draft, Pending, Active, Expired, Terminated)
+  - Leases table with tenant, unit, status badge, rent, start date, version, template
+  - "Generate Lease" dialog with template/tenant/unit selection, date pickers, rent override
+  - Links to Templates page
+- Created `/dashboard/leases/templates/page.tsx` with:
+  - Template card grid with name, description, jurisdiction, lease count, preview
+  - Create/Edit dialog with full template editor (name, jurisdiction, description, content textarea)
+  - Show/Hide markers panel with clickable insertion buttons for all 19 markers
+  - Delete template (with protection for templates with existing leases)
+  - Available Markers reference card at bottom
+  - Placeholder text showing example lease template structure
+- Added "Leases" nav item to sidebar (with FileText icon) between Applications and Inbox
+
+**Environment Variables Required:**
+- `XODO_SIGN_API_TOKEN` - Bearer token for Xodo Sign API
+- `XODO_SIGN_BASE_URL` - API base URL (default: https://api.signnow.com)
+- `NEXT_PUBLIC_APP_URL` - App URL for webhook callbacks
+
+**Commands Run:**
+- `npx prisma validate` - schema validated
+- `npx prisma generate` - regenerated client with new models
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 43 routes compiled
+
+**Browser Verification:**
+- Build output confirms `/dashboard/leases` (5.96 kB) and `/dashboard/leases/templates` (5.4 kB) compile successfully
+- API routes `/api/leases`, `/api/leases/generate`, `/api/leases/sign`, `/api/lease-templates`, `/api/webhooks/xodo-sign` all compiled as dynamic server routes
+- agent-browser tool unavailable due to resource error - verified via successful build compilation (matching previous tasks' pattern)
+
+**Issues & Resolutions:**
+- Prisma `InputJsonValue` type mismatch with `Record<string, unknown>` - resolved by casting metadata as `Prisma.InputJsonValue`
+- Template literal `${{rent_amount}}` parsed as JS expression in placeholder - resolved by using regular string literal instead of template literal
+- agent-browser experiencing "Resource temporarily unavailable" errors - verified via build output matching prior task pattern

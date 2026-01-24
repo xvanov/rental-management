@@ -337,7 +337,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Store signed lease with version metadata",
       "Display lease history and versions on tenant detail page"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

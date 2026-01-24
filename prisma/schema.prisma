@@ -132,6 +132,18 @@ model Tenant {
 
 // ─── Lease ─────────────────────────────────────────────────────────────────
 
+model LeaseTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  content     String
+  description String?
+  jurisdiction String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leases Lease[]
+}
+
 enum LeaseStatus {
   DRAFT
   PENDING_SIGNATURE
@@ -144,22 +156,27 @@ model Lease {
   id        String      @id @default(cuid())
   tenantId  String
   unitId    String
+  templateId String?
   status    LeaseStatus @default(DRAFT)
   content   String
+  rentAmount Float?
   version   Int         @default(1)
   startDate DateTime
   endDate   DateTime?
   signedAt  DateTime?
   signedDocumentUrl String?
+  xodoSignDocumentId String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  tenant  Tenant        @relation(fields: [tenantId], references: [id])
-  unit    Unit          @relation(fields: [unitId], references: [id])
-  clauses LeaseClause[]
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  unit     Unit           @relation(fields: [unitId], references: [id])
+  template LeaseTemplate? @relation(fields: [templateId], references: [id])
+  clauses  LeaseClause[]
 
   @@index([tenantId])
   @@index([unitId])
+  @@index([templateId])
 }
 
 model LeaseClause {
