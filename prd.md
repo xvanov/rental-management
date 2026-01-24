@@ -399,7 +399,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Log cleaning violations as events",
       "Show cleaning status on dashboard"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

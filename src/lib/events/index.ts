@@ -70,6 +70,17 @@ export async function logSystemEvent(
   });
 }
 
+export async function logCleaningEvent(
+  payload: PayloadDataForType<"CLEANING">,
+  opts?: { tenantId?: string; propertyId?: string }
+) {
+  return createEvent({
+    type: "CLEANING",
+    payload,
+    ...opts,
+  });
+}
+
 // ─── Query Helpers ───────────────────────────────────────────────────────────
 
 /**
