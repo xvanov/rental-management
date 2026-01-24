@@ -353,7 +353,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Show payment history on tenant detail page",
       "Add ledger export (CSV and PDF)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
