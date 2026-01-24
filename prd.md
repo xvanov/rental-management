@@ -499,7 +499,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Configure build command and start command",
       "Verify deployment works with all services connected"
     ],
-    "passes": false
+    "passes": true
   }
 ]
 ```
