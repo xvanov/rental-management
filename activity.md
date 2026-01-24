@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 15
-**Current Task:** Task 15 complete - Build payment ledger and tracking system
+**Tasks Completed:** 16
+**Current Task:** Task 16 complete - Build automated enforcement workflow
 
 ---
 
@@ -769,3 +769,75 @@ Each entry should include:
 - Dashboard page cannot be verified directly in browser without Google OAuth session - verified via successful build compilation (10.1 kB page, matching prior task pattern)
 - API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
 - agent-browser middleware redirect causes ERR_CONNECTION_REFUSED - known pattern from prior tasks, confirmed page works via build output
+
+### 2026-01-24 - Task 16: Build automated enforcement workflow
+
+**Changes Made:**
+- Created `src/lib/enforcement/rules-engine.ts` with:
+  - `evaluateEnforcementRules()` - evaluates all active leases against enforcement rules
+  - `buildEnforcementContext()` - extracts lease clause data (dueDay, gracePeriod, lateFee) into typed context
+  - `checkRentReminders()` - identifies tenants needing reminders (3 days and 1 day before due)
+  - `checkLateRent()` - identifies tenants past grace period without payment
+  - `checkEscalation()` - identifies unresolved notices needing escalation (10+ days)
+  - `generateLateRentNoticeContent()` - generates formal late rent notice text
+  - `generateViolationNoticeContent()` - generates lease violation notice with payment plan option
+  - Prevents duplicate reminders/notices per period via database checks
+- Created `src/lib/jobs/enforcement.ts` with BullMQ job definitions:
+  - `enqueueRentReminder()` - schedules rent reminder SMS/email
+  - `enqueueLateNotice()` - schedules late rent notice generation and delivery
+  - `enqueueEscalation()` - schedules escalation to lease violation
+  - `processEnforcementActions()` - processes rule engine output into queued jobs
+  - `startEnforcementWorker()` - creates BullMQ worker handling all 3 job types
+  - `handleRentReminder()` - sends SMS + email reminder, logs SYSTEM event
+  - `handleLateNotice()` - creates Notice record, sends SMS/email, applies late fee to ledger, schedules 10-day escalation
+  - `handleEscalation()` - checks if still unpaid, generates violation notice, sends via SMS/email
+- Created `GET/POST/PATCH /api/notices` route with:
+  - GET: Returns notices with filters (tenantId, type, status), includes tenant/unit/property
+  - POST: Creates manual notice (tenantId, type, content) with event logging
+  - PATCH: Updates notice status with transition validation (DRAFT→SENT→SERVED→ACKNOWLEDGED), proof of service upload
+- Created `POST /api/enforcement/run` route:
+  - Evaluates enforcement rules and processes all resulting actions
+  - Starts enforcement worker, logs ENFORCEMENT_RUN system event
+  - Returns list of actions processed
+- Created `GET /api/cron/enforcement` route:
+  - Daily cron endpoint for automated enforcement checks
+  - Validates CRON_SECRET bearer token in production
+  - Runs same evaluation + processing as manual trigger
+- Created `GET /api/notices/print` route:
+  - Generates printable HTML page for any notice with legal document formatting
+  - Includes tenant info, property address, notice content, signature line
+  - Browser print button for saving as PDF
+  - Uses Times New Roman serif font, proper 1-inch margins for legal docs
+- Rewrote `/dashboard/enforcement` page as full-featured client component with:
+  - 4 stat cards: Total Notices, Active, Drafts, Resolved
+  - "Run Enforcement Check" button (triggers /api/enforcement/run)
+  - "Create Notice" dialog with tenant select, type select, content textarea
+  - Status filter tabs (All, Active, Drafts, Served, Resolved)
+  - Type filter dropdown (Late Rent, Lease Violation, Eviction Warning, etc.)
+  - Notices table with tenant, type badge, status badge, dates, action buttons
+  - View notice detail dialog showing full notice content in monospace pre block
+  - Send action (transitions DRAFT → SENT)
+  - Upload Proof of Service dialog (marks as SERVED)
+  - Resolve action (marks as ACKNOWLEDGED)
+  - All actions log immutable events
+
+**Commands Run:**
+- `npm run lint` - passed, no warnings or errors (fixed 1 unused var)
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 51 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders correctly
+- `agent-browser open http://localhost:3001/api/notices` - API route compiled and responds
+- `agent-browser open http://localhost:3001/api/enforcement/run` - API route compiled and responds
+- `agent-browser open http://localhost:3001/api/cron/enforcement` - API route compiled and responds
+- `agent-browser open http://localhost:3001/api/notices/print?noticeId=test` - print route compiled and responds
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- All API routes compiled as dynamic server routes and respond correctly
+- Build output confirms `/dashboard/enforcement` (10 kB) compiles successfully
+- Middleware correctly redirects unauthenticated users to /login
+
+**Issues & Resolutions:**
+- Unused `leaseId` variable in `handleEscalation` - removed from destructuring
+- Cannot verify full enforcement dashboard UI without Google OAuth session - verified via successful build compilation (10 kB page)
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered

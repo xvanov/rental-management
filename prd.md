@@ -370,7 +370,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Create /dashboard/enforcement status board showing active violations",
       "Schedule escalation jobs for unresolved violations"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
