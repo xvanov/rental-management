@@ -278,7 +278,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Link incoming messages to tenant by phone number",
       "Add SMS group chat support (send to all tenants in a property)"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",

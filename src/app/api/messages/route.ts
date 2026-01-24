@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logMessageEvent } from "@/lib/events";
+import { sendSms } from "@/lib/integrations/twilio";
 
 export async function GET(request: NextRequest) {
   try {
@@ -129,7 +130,29 @@ export async function POST(request: NextRequest) {
     // Implement channel switching rule: if phone is available, default to SMS
     const effectiveChannel = tenant.phone && channel !== "EMAIL" ? "SMS" : channel;
 
-    // Create the message
+    // If SMS channel and Twilio is configured, send via Twilio
+    if (effectiveChannel === "SMS" && tenant.phone && process.env.TWILIO_ACCOUNT_SID) {
+      const result = await sendSms({
+        to: tenant.phone,
+        body: content,
+        tenantId,
+        propertyId: tenant.unit?.propertyId,
+      });
+
+      // Fetch the message with tenant info for response
+      const messageWithTenant = await prisma.message.findUnique({
+        where: { id: result.message.id },
+        include: {
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+          },
+        },
+      });
+
+      return NextResponse.json(messageWithTenant, { status: 201 });
+    }
+
+    // Fallback: create message record without sending (for non-SMS or unconfigured Twilio)
     const message = await prisma.message.create({
       data: {
         tenantId,
