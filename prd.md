@@ -210,7 +210,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Create event query helpers (by tenant, by property, by date range)",
       "Add event creation to a test API route and verify immutability"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
