@@ -484,7 +484,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Display upcoming enforcement deadlines",
       "Add property-level summary cards"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",

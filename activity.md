@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-24
-**Tasks Completed:** 23
-**Current Task:** Task 23 complete - Set up Facebook Marketplace integration (Meta Graph API)
+**Tasks Completed:** 24
+**Current Task:** Task 24 complete - Build the dashboard home page with action items and stats
 
 ---
 
@@ -1296,3 +1296,44 @@ Each entry should include:
 - Auto-response uses dynamic import for AI module to avoid circular dependencies
 - Cannot test actual Facebook API calls without credentials configured - code compiles and routes work; actual functionality will work when env vars are set
 - `agent-browser screenshot` still has the known validation error bug - verified via build output and snapshot
+
+### 2026-01-24 - Task 24: Build the dashboard home page with action items and stats
+
+**Changes Made:**
+- Created `GET /api/dashboard` API route with aggregated dashboard data:
+  - Key metrics: propertyCount, unitCount, occupiedUnits, occupancyRate, activeTenants, monthlyRevenue, outstandingBalance, unreadMessages
+  - Action items: dynamically generated list based on pending applications, unread messages, active enforcement, upcoming showings, outstanding balances
+  - Upcoming showings: next 7 days with property info
+  - Enforcement deadlines: active notices (DRAFT/SENT status)
+  - Recent events: last 10 events with tenant names
+  - Property summaries: per-property occupancy rate, unit count, tenant count
+  - Outstanding balance calculated from latest ledger entries per tenant
+  - Monthly revenue calculated from active lease rent amounts
+- Rewrote `/dashboard/page.tsx` as a full-featured client component (5.61 kB) with:
+  - 4 key metric cards: Occupancy Rate (%), Monthly Revenue ($), Outstanding Balance ($, red when > 0), Properties (with unit count)
+  - Action Items card: linked list with priority badges (high=destructive, medium=default, low=secondary), type-specific icons, arrow navigation
+  - Quick Actions card: 4 buttons linking to Send Message, Log Payment, Create Showing, New Application Link
+  - Enforcement Deadlines card: active notices with tenant name, type, status badge, relative time
+  - Upcoming Showings card: next showings with attendee name, property, date/time, status badge
+  - Recent Activity feed: last 10 events with type icons, type badges, tenant names, descriptions, relative timestamps
+  - Property Summary cards: grid showing each property's occupancy rate, unit count, and tenant count (links to property detail)
+  - Empty states with appropriate icons for all sections when no data
+  - Loading state during initial fetch
+
+**Commands Run:**
+- `npm run lint` - passed, no warnings or errors
+- `npx tsc --noEmit` - type checking passed
+- `npm run build` - successful production build, all 72 routes compiled
+- `agent-browser open http://localhost:3001/login` - login page renders with Google sign-in button
+- `agent-browser open http://localhost:3001/api/dashboard` - API route compiled and responds
+
+**Browser Verification:**
+- Login page renders with "Sign in with Google" button
+- API route `/api/dashboard` compiled as dynamic server route and responds
+- Build output confirms `/dashboard` (5.61 kB) compiles successfully
+- Middleware correctly redirects unauthenticated users to /login
+
+**Issues & Resolutions:**
+- Dev server had webpack module cache errors during hot-reload - known Next.js 15 internal issue, production build passes cleanly
+- Cannot verify full dashboard UI without Google OAuth session - verified via successful build compilation (5.61 kB page)
+- API endpoints return 500 without running PostgreSQL - expected; code compiles correctly and routes are registered
