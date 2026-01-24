@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logMessageEvent } from "@/lib/events";
 import { sendSms } from "@/lib/integrations/twilio";
+import { sendEmail } from "@/lib/integrations/sendgrid";
 
 export async function GET(request: NextRequest) {
   try {
@@ -152,7 +153,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(messageWithTenant, { status: 201 });
     }
 
-    // Fallback: create message record without sending (for non-SMS or unconfigured Twilio)
+    // If EMAIL channel and SendGrid is configured, send via SendGrid
+    if (effectiveChannel === "EMAIL" && tenant.email && process.env.SENDGRID_API_KEY) {
+      const subject = body.subject ?? "Message from Rental Ops";
+      const result = await sendEmail({
+        to: tenant.email,
+        subject,
+        text: content,
+        html: body.html,
+        tenantId,
+        propertyId: tenant.unit?.propertyId,
+      });
+
+      // Fetch the message with tenant info for response
+      const messageWithTenant = await prisma.message.findUnique({
+        where: { id: result.message.id },
+        include: {
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+          },
+        },
+      });
+
+      return NextResponse.json(messageWithTenant, { status: 201 });
+    }
+
+    // Fallback: create message record without sending (for unconfigured integrations)
     const message = await prisma.message.create({
       data: {
         tenantId,

@@ -292,7 +292,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Support HTML and plain text email templates",
       "Link incoming emails to tenant by email address"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
