@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { logMessageEvent } from "@/lib/events";
 import { sendSms } from "@/lib/integrations/twilio";
 import { sendEmail } from "@/lib/integrations/sendgrid";
+import { sendFacebookMessage, isFacebookConfigured } from "@/lib/integrations/facebook";
 
 export async function GET(request: NextRequest) {
   try {
@@ -176,6 +177,35 @@ export async function POST(request: NextRequest) {
       });
 
       return NextResponse.json(messageWithTenant, { status: 201 });
+    }
+
+    // If FACEBOOK channel and Facebook is configured, send via Messenger
+    if (effectiveChannel === "FACEBOOK" && isFacebookConfigured()) {
+      // Need tenant's facebookId to send via Messenger
+      const tenantWithFb = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { facebookId: true },
+      });
+
+      if (tenantWithFb?.facebookId) {
+        const result = await sendFacebookMessage({
+          recipientId: tenantWithFb.facebookId,
+          text: content,
+          tenantId,
+          propertyId: tenant.unit?.propertyId,
+        });
+
+        const messageWithTenant = await prisma.message.findUnique({
+          where: { id: result.message.id },
+          include: {
+            tenant: {
+              select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+            },
+          },
+        });
+
+        return NextResponse.json(messageWithTenant, { status: 201 });
+      }
     }
 
     // Fallback: create message record without sending (for unconfigured integrations)

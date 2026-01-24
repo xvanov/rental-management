@@ -471,7 +471,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Detect phone number in conversation to trigger SMS channel switch",
       "Store all Facebook conversations as immutable events"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

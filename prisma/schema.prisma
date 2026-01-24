@@ -105,16 +105,17 @@ model Unit {
 // ─── Tenant ────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id        String   @id @default(cuid())
-  firstName String
-  lastName  String
-  email     String?
-  phone     String?
-  unitId    String?
-  active    Boolean  @default(true)
-  deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  facebookId String?
+  unitId     String?
+  active     Boolean  @default(true)
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   unit                 Unit?                @relation(fields: [unitId], references: [id])
   leases               Lease[]
@@ -129,6 +130,7 @@ model Tenant {
   @@index([unitId])
   @@index([email])
   @@index([phone])
+  @@index([facebookId])
 }
 
 // ─── Lease ─────────────────────────────────────────────────────────────────
