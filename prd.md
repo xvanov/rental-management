@@ -197,7 +197,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Add BullMQ dashboard route (bull-board) at /dashboard/jobs",
       "Verify job enqueue and processing works"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",

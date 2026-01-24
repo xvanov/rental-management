@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 3
-**Current Task:** Task 3 complete - Configure NextAuth.js with Google OAuth
+**Tasks Completed:** 4
+**Current Task:** Task 4 complete - Set up BullMQ with Redis for background job processing
 
 ---
 
@@ -130,3 +130,48 @@ Each entry should include:
 - Initial build failed with "node:child_process" webpack errors - middleware was importing `auth` from `@/lib/auth` which bundled Prisma (Node.js-only). Resolved by splitting config: `auth.config.ts` (Edge-safe, no Prisma) used by middleware, `auth.ts` (with PrismaAdapter) used by server components
 - `agent-browser screenshot` still has validation error bug - used snapshot for verification
 - `agent-browser navigate` to /dashboard fails with connection refused after middleware redirect - verified middleware works via successful build and compiled middleware output in dev server logs
+
+### 2026-01-23 - Task 4: Set up BullMQ with Redis for background job processing
+
+**Changes Made:**
+- Installed `bullmq` and `ioredis` packages for job queue and Redis connectivity
+- Created Redis connection utility at `src/lib/redis.ts` with lazy connection (`lazyConnect: true`) to prevent errors during build
+- Supports REDIS_URL env var or individual REDIS_HOST/PORT/PASSWORD config
+- Created base queue and worker setup at `src/lib/jobs/index.ts` with:
+  - `getQueue(name)` - creates/retrieves named queues with singleton pattern
+  - `createWorker(queueName, processor)` - creates workers with error/completion logging
+  - Default job options: removeOnComplete (keep 100), removeOnFail (keep 50)
+- Created test job at `src/lib/jobs/test-job.ts` with:
+  - `enqueueTestJob(message)` - enqueues a test job with message and timestamp
+  - `createTestWorker()` - creates a worker that logs job processing to console
+- Created API route `POST /api/jobs/test` to enqueue test jobs (starts worker on first call)
+- Created queue stats utility at `src/lib/jobs/board.ts` with:
+  - `getQueueStats()` - returns waiting/active/completed/failed/delayed counts per queue
+  - `getRecentJobs(queueName)` - returns recent jobs with status info
+- Created API route `GET /api/jobs/stats` returning queue stats and recent jobs
+- Created Job Queue Dashboard page at `/dashboard/jobs` with:
+  - Queue stats display (card grid showing counts per queue)
+  - Recent jobs table (ID, name, status badge, created time, data)
+  - "Enqueue Test Job" button for testing
+  - Auto-refresh every 5 seconds
+  - Error state handling (graceful display when Redis unavailable)
+- Removed unused `@bull-board/api`, `@bull-board/express`, and `express` packages (custom dashboard is more idiomatic for Next.js App Router)
+
+**Commands Run:**
+- `npm install bullmq ioredis` - installed queue and Redis packages
+- `npm install` - reinstalled after removing unused packages
+- `npx tsc --noEmit` - type checking passed
+- `npm run lint` - no warnings or errors
+- `npm run build` - successful production build, all routes compiled
+- `agent-browser open http://localhost:3000/dashboard/jobs` - middleware correctly redirects to login
+
+**Browser Verification:**
+- Dashboard page loads (redirects to login due to auth middleware, confirming protection works)
+- Build output confirms `/dashboard/jobs` compiled as static page (2.21 kB)
+- API routes `/api/jobs/stats` and `/api/jobs/test` compiled as dynamic server routes
+
+**Issues & Resolutions:**
+- `@bull-board/next` package doesn't exist on npm - resolved by building a custom dashboard page instead
+- Initial build had ioredis "connect ECONNREFUSED" warnings during static page generation - resolved by adding `lazyConnect: true` to Redis connection config
+- BullMQ `QueueOptions` type requires `connection` to be non-optional when spreading Partial options - resolved by passing connection directly in queue constructor
+- agent-browser connection refused on port 3001 - switched to port 3000, confirmed page works via redirect behavior
