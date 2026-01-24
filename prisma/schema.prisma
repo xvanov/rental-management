@@ -1,0 +1,368 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Property & Unit ───────────────────────────────────────────────────────
+
+model Property {
+  id           String   @id @default(cuid())
+  address      String
+  city         String
+  state        String
+  zip          String
+  jurisdiction String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  units    Unit[]
+  showings Showing[]
+  events   Event[]
+}
+
+enum UnitStatus {
+  VACANT
+  OCCUPIED
+  MAINTENANCE
+}
+
+model Unit {
+  id         String     @id @default(cuid())
+  name       String
+  propertyId String
+  status     UnitStatus @default(VACANT)
+  rentAmount Float?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  property             Property             @relation(fields: [propertyId], references: [id])
+  leases               Lease[]
+  tenants              Tenant[]
+  cleaningAssignments  CleaningAssignment[]
+
+  @@index([propertyId])
+}
+
+// ─── Tenant ────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  unitId    String?
+  active    Boolean  @default(true)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unit                 Unit?                @relation(fields: [unitId], references: [id])
+  leases               Lease[]
+  payments             Payment[]
+  ledgerEntries        LedgerEntry[]
+  messages             Message[]
+  notices              Notice[]
+  applications         Application[]
+  cleaningAssignments  CleaningAssignment[]
+  events               Event[]
+
+  @@index([unitId])
+  @@index([email])
+  @@index([phone])
+}
+
+// ─── Lease ─────────────────────────────────────────────────────────────────
+
+enum LeaseStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
+model Lease {
+  id        String      @id @default(cuid())
+  tenantId  String
+  unitId    String
+  status    LeaseStatus @default(DRAFT)
+  content   String
+  version   Int         @default(1)
+  startDate DateTime
+  endDate   DateTime?
+  signedAt  DateTime?
+  signedDocumentUrl String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  unit    Unit          @relation(fields: [unitId], references: [id])
+  clauses LeaseClause[]
+
+  @@index([tenantId])
+  @@index([unitId])
+}
+
+model LeaseClause {
+  id       String @id @default(cuid())
+  leaseId  String
+  type     String
+  content  String
+  metadata Json?
+  createdAt DateTime @default(now())
+
+  lease Lease @relation(fields: [leaseId], references: [id])
+
+  @@index([leaseId])
+}
+
+// ─── Event (Immutable) ─────────────────────────────────────────────────────
+
+enum EventType {
+  MESSAGE
+  PAYMENT
+  NOTICE
+  UPLOAD
+  VIOLATION
+  INSPECTION
+  SYSTEM
+  LEASE
+  APPLICATION
+  SHOWING
+  CLEANING
+}
+
+model Event {
+  id         String    @id @default(cuid())
+  type       EventType
+  tenantId   String?
+  propertyId String?
+  payload    Json
+  createdAt  DateTime  @default(now())
+
+  tenant   Tenant?   @relation(fields: [tenantId], references: [id])
+  property Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ─── Payment & Ledger ──────────────────────────────────────────────────────
+
+enum PaymentMethod {
+  ZELLE
+  VENMO
+  CASHAPP
+  PAYPAL
+  CASH
+  CHECK
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  tenantId  String
+  amount    Float
+  method    PaymentMethod
+  date      DateTime
+  note      String?
+  createdAt DateTime      @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([date])
+}
+
+enum LedgerEntryType {
+  RENT
+  LATE_FEE
+  UTILITY
+  DEPOSIT
+  CREDIT
+  PAYMENT
+  DEDUCTION
+}
+
+model LedgerEntry {
+  id          String          @id @default(cuid())
+  tenantId    String
+  type        LedgerEntryType
+  amount      Float
+  description String?
+  period      String?
+  balance     Float
+  createdAt   DateTime        @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([period])
+}
+
+// ─── Message ───────────────────────────────────────────────────────────────
+
+enum MessageChannel {
+  SMS
+  EMAIL
+  FACEBOOK
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model Message {
+  id        String           @id @default(cuid())
+  tenantId  String?
+  channel   MessageChannel
+  direction MessageDirection
+  content   String
+  metadata  Json?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([channel])
+  @@index([createdAt])
+}
+
+// ─── Notice ────────────────────────────────────────────────────────────────
+
+enum NoticeType {
+  LATE_RENT
+  LEASE_VIOLATION
+  EVICTION_WARNING
+  DEPOSIT_DISPOSITION
+  MOVE_OUT
+}
+
+enum NoticeStatus {
+  DRAFT
+  SENT
+  SERVED
+  ACKNOWLEDGED
+}
+
+model Notice {
+  id              String       @id @default(cuid())
+  tenantId        String
+  type            NoticeType
+  status          NoticeStatus @default(DRAFT)
+  content         String
+  sentAt          DateTime?
+  servedAt        DateTime?
+  proofOfService  String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([type])
+}
+
+// ─── Showing ───────────────────────────────────────────────────────────────
+
+enum ShowingStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+model Showing {
+  id            String        @id @default(cuid())
+  propertyId    String
+  date          DateTime
+  attendeeName  String?
+  attendeePhone String?
+  attendeeEmail String?
+  status        ShowingStatus @default(SCHEDULED)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+  @@index([date])
+}
+
+// ─── Application ───────────────────────────────────────────────────────────
+
+enum ApplicationStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Application {
+  id             String            @id @default(cuid())
+  tenantId       String?
+  token          String            @unique @default(cuid())
+  status         ApplicationStatus @default(PENDING)
+  firstName      String?
+  lastName       String?
+  email          String?
+  phone          String?
+  currentAddress String?
+  employer       String?
+  income         Float?
+  rentalHistory  Json?
+  evictionHistory Json?
+  documents      Json?
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewNotes    String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+// ─── Cleaning Assignment ───────────────────────────────────────────────────
+
+enum CleaningStatus {
+  PENDING
+  SUBMITTED
+  VALIDATED
+  FAILED
+  OVERDUE
+}
+
+model CleaningAssignment {
+  id          String         @id @default(cuid())
+  tenantId    String
+  unitId      String
+  token       String         @unique @default(cuid())
+  weekOf      DateTime
+  status      CleaningStatus @default(PENDING)
+  photos      Json?
+  validatedAt DateTime?
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  unit   Unit   @relation(fields: [unitId], references: [id])
+
+  @@index([tenantId])
+  @@index([unitId])
+  @@index([weekOf])
+}

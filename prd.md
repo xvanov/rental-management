@@ -171,7 +171,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Run initial migration (prisma migrate dev)",
       "Create a seed script with sample property and unit data"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",
