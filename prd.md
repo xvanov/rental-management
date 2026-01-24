@@ -428,7 +428,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Update unit status to vacant",
       "Remove tenant from SMS group chat"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

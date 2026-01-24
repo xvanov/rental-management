@@ -19,6 +19,7 @@ import {
   Zap,
   Sparkles,
   Home,
+  DoorOpen,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -57,6 +58,7 @@ const navItems = [
   { title: "Enforcement", href: "/dashboard/enforcement", icon: ShieldAlert },
   { title: "Calendar", href: "/dashboard/calendar", icon: Calendar },
   { title: "Move-In", href: "/dashboard/move-in", icon: Home },
+  { title: "Move-Out", href: "/dashboard/move-out", icon: DoorOpen },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
