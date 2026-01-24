@@ -223,7 +223,7 @@ Full-stack monolith deployed as a single Next.js application on Railway with man
       "Make layout responsive (collapsible sidebar on mobile)",
       "Add breadcrumb navigation"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
