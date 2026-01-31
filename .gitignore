@@ -43,3 +43,19 @@ yarn-error.log*
 src/generated/prisma
 
 /src/generated/prisma
+
+# utility bill data (contains sensitive info)
+/data/
+
+# Python virtual environments and caches
+/scripts/*/.venv/
+/scripts/*/.cache/
+/scripts/*/__pycache__/
+/scripts/*/*.pyc
+
+# Claude Code
+.claude/
+
+# BMAD workflow files (installed via npm)
+_bmad/
+_bmad-output/
