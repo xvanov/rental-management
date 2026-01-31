@@ -49,8 +49,14 @@ export async function GET(req: NextRequest) {
       byType[bill.type].count += 1;
     }
 
-    // Aggregate by property
-    const byProperty: Record<string, { propertyId: string; address: string; total: number; count: number }> = {};
+    // Aggregate by property with utility type breakdown
+    const byProperty: Record<string, {
+      propertyId: string;
+      address: string;
+      total: number;
+      count: number;
+      byType: Record<string, number>;
+    }> = {};
     for (const bill of bills) {
       if (!byProperty[bill.propertyId]) {
         byProperty[bill.propertyId] = {
@@ -58,10 +64,16 @@ export async function GET(req: NextRequest) {
           address: bill.property.address,
           total: 0,
           count: 0,
+          byType: {},
         };
       }
       byProperty[bill.propertyId].total += bill.amount;
       byProperty[bill.propertyId].count += 1;
+      // Track by utility type
+      if (!byProperty[bill.propertyId].byType[bill.type]) {
+        byProperty[bill.propertyId].byType[bill.type] = 0;
+      }
+      byProperty[bill.propertyId].byType[bill.type] += bill.amount;
     }
 
     // Per-tenant utility charges from ledger
