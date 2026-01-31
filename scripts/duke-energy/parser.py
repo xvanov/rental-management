@@ -107,35 +107,47 @@ def extract_account_number(text: str) -> Optional[str]:
 
 def extract_service_address(text: str) -> Optional[str]:
     """Extract service address from text."""
-    # Look for "Service address" section
-    patterns = [
-        # Service address followed by name and address on next lines
-        r'Service\s+address[^\n]*\n([A-Z][A-Z\s]+)\n(\d+\s+[A-Z0-9\s]+(?:WAY|ST|AVE|DR|CT|RD|LN|BLVD|PL))\n([A-Z]+\s+[A-Z]{2}\s+\d{5})',
-        # Just the street address line
-        r'(\d+\s+[A-Z0-9]+(?:\s+[A-Z0-9]+)*\s+(?:WAY|ST|AVE|DR|CT|RD|LN|BLVD|PL))\s*\n\s*([A-Z]+\s+[A-Z]{2}\s+\d{5})',
-    ]
+    lines = text.split('\n')
 
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-        if match:
-            groups = match.groups()
-            if len(groups) >= 3:
-                # Full match with name, street, city/state/zip
-                street = groups[1].strip()
-                city_state_zip = groups[2].strip()
-                return f"{street}, {city_state_zip}"
-            elif len(groups) >= 2:
-                street = groups[0].strip()
-                city_state_zip = groups[1].strip()
-                return f"{street}, {city_state_zip}"
+    # Strategy 1: Find line after "Service address" that looks like an address
+    # Duke Energy format:
+    #   Line N:   "Service address Bill date Jan 13, 2026"
+    #   Line N+1: "KALIN IVANOV For service Dec 9 - Jan 9"
+    #   Line N+2: "310 HOWARD ST UNIT 2 32 days"
+    #   Line N+3: "DURHAM NC 27704"
+    for i, line in enumerate(lines):
+        if 'service address' in line.lower():
+            # Look at lines N+2 and beyond for the street address
+            for j in range(i + 1, min(i + 5, len(lines))):
+                addr_line = lines[j].strip()
+                # Look for street address pattern at start of line
+                # Must start with house number and contain street suffix
+                # Stop before "XX days" pattern
+                addr_match = re.match(
+                    r'^(\d+\s+[A-Z]+(?:\s+[A-Z]+)*\s+(?:WAY|ST|AVE|DR|CT|RD|LN|BLVD|PL)(?:\s+(?:UNIT|APT|#)\s*[A-Z0-9]+)?)',
+                    addr_line, re.IGNORECASE
+                )
+                if addr_match:
+                    street = addr_match.group(1).strip()
+                    # Look for city/state/zip on next line
+                    if j + 1 < len(lines):
+                        next_line = lines[j + 1].strip()
+                        city_match = re.match(r'^([A-Z]+\s+[A-Z]{2}\s+\d{5})', next_line, re.IGNORECASE)
+                        if city_match:
+                            return f"{street}, {city_match.group(1)}"
+                    return street
+            break
 
-    # Fallback: look for common NC address pattern
-    address_match = re.search(
-        r'(\d+\s+[A-Z0-9]+(?:\s+[A-Z0-9]+)*\s+(?:WAY|ST|AVE|DR|CT|RD|LN|BLVD|PL))',
-        text, re.IGNORECASE
-    )
-    if address_match:
-        return address_match.group(1).strip()
+    # Fallback: look for address pattern on its own line (must be at line start)
+    for line in lines:
+        line = line.strip()
+        # Address must start with house number at beginning of line
+        addr_match = re.match(
+            r'^(\d+\s+[A-Z]+(?:\s+[A-Z0-9]+)*\s+(?:WAY|ST|AVE|DR|CT|RD|LN|BLVD|PL))',
+            line, re.IGNORECASE
+        )
+        if addr_match:
+            return addr_match.group(1).strip()
 
     return None
 

@@ -65,6 +65,10 @@ export function normalizeAddress(address: string): string {
     .replace(/\bWAY\b/g, "WAY")
     .trim();
 
+  // Normalize unit formats:
+  // "UNIT 2" -> "2", "APT B" -> "B", etc.
+  normalized = normalized.replace(/\s+(?:UNIT|APT|APARTMENT|STE|SUITE)\s+/gi, " ");
+
   // Normalize unit letters (310B -> 310 B, 310 B -> 310B for comparison)
   // Convert "310B" to "310 B" and "310 B" to "310 B" for consistent format
   normalized = normalized.replace(/^(\d+)([A-Z])(\s)/, "$1 $2$3");
@@ -73,14 +77,30 @@ export function normalizeAddress(address: string): string {
 }
 
 /**
+ * Extract the street-only portion without city/state/zip.
+ * "310 HOWARD ST, DURHAM NC 27704" -> "310 HOWARD ST"
+ */
+export function getStreetOnly(address: string): string {
+  // Remove everything after comma (city/state/zip)
+  const commaIdx = address.indexOf(",");
+  if (commaIdx > 0) {
+    return address.substring(0, commaIdx).trim();
+  }
+  // Also check for city/state/zip pattern without comma
+  return address.replace(/\s+[A-Z]+\s+[A-Z]{2}\s+\d{5}(-\d{4})?$/i, "").trim();
+}
+
+/**
  * Extract the base address without unit letter for fuzzy matching.
  * "310B HOWARD ST" -> "310 HOWARD ST"
  * "310 HOWARD ST B" -> "310 HOWARD ST"
+ * "310 HOWARD ST UNIT 2" -> "310 HOWARD ST"
  */
 export function getBaseAddress(address: string): string {
-  const normalized = normalizeAddress(address);
-  // Remove trailing unit letter (e.g., "310 HOWARD ST B" -> "310 HOWARD ST")
-  let base = normalized.replace(/\s+[A-Z]$/, "");
+  // First get just the street portion
+  let base = getStreetOnly(normalizeAddress(address));
+  // Remove trailing unit letter or number (e.g., "310 HOWARD ST B" -> "310 HOWARD ST")
+  base = base.replace(/\s+[A-Z0-9]$/, "");
   // Remove unit letter after number (e.g., "310 B HOWARD ST" -> "310 HOWARD ST")
   base = base.replace(/^(\d+)\s+[A-Z]\s+/, "$1 ");
   return base;
@@ -116,45 +136,52 @@ export function matchPropertyId(
   }
 
   const normalized = normalizeAddress(serviceLocation);
+  // Get just the street portion (strip city/state/zip from utility bill addresses)
+  const serviceStreetOnly = getStreetOnly(normalized);
   const serviceBase = getBaseAddress(serviceLocation);
 
-  // Direct match
+  // Direct match on full normalized address
   if (addressMap.has(normalized)) {
     return addressMap.get(normalized)!;
+  }
+
+  // Direct match on street-only (utility bill has city/state/zip, DB doesn't)
+  if (addressMap.has(serviceStreetOnly)) {
+    return addressMap.get(serviceStreetOnly)!;
   }
 
   // Find best fuzzy match
   let bestMatch: { id: string; score: number } | null = null;
 
   for (const [propAddr, propId] of addressMap) {
-    // Try exact base address match first
+    // Try exact base address match first (ignores unit letters/numbers)
     const propBase = getBaseAddress(propAddr);
     if (serviceBase === propBase) {
       return propId;
     }
 
-    // Fuzzy match on normalized addresses
-    const score = similarity(normalized, propAddr);
-    if (score >= threshold && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { id: propId, score };
+    // Fuzzy match on street-only addresses (most reliable)
+    const streetScore = similarity(serviceStreetOnly, propAddr);
+    if (streetScore >= threshold && (!bestMatch || streetScore > bestMatch.score)) {
+      bestMatch = { id: propId, score: streetScore };
     }
 
-    // Also try fuzzy match on base addresses (higher weight)
+    // Also try fuzzy match on base addresses (strips units)
     const baseScore = similarity(serviceBase, propBase);
     if (baseScore >= threshold && (!bestMatch || baseScore > bestMatch.score)) {
       bestMatch = { id: propId, score: baseScore };
     }
 
     // Extract street number and check if same
-    const serviceNum = normalized.match(/^(\d+)/)?.[1];
+    const serviceNum = serviceStreetOnly.match(/^(\d+)/)?.[1];
     const propNum = propAddr.match(/^(\d+)/)?.[1];
     if (serviceNum && propNum && serviceNum === propNum) {
-      // Same street number - check street name similarity
-      const serviceStreet = normalized.replace(/^\d+\s*[A-Z]?\s*/, "");
-      const propStreet = propAddr.replace(/^\d+\s*[A-Z]?\s*/, "");
-      const streetScore = similarity(serviceStreet, propStreet);
-      if (streetScore >= 0.7 && (!bestMatch || streetScore > bestMatch.score)) {
-        bestMatch = { id: propId, score: streetScore };
+      // Same street number - check street name similarity (strip number and unit)
+      const serviceStreet = serviceStreetOnly.replace(/^\d+\s*[A-Z0-9]?\s*/, "");
+      const propStreet = propAddr.replace(/^\d+\s*[A-Z0-9]?\s*/, "");
+      const streetNameScore = similarity(serviceStreet, propStreet);
+      if (streetNameScore >= 0.7 && (!bestMatch || streetNameScore > bestMatch.score)) {
+        bestMatch = { id: propId, score: streetNameScore };
       }
     }
   }
