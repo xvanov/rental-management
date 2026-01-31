@@ -8,7 +8,21 @@ import {
   ArrowRightLeft,
   Clock,
   CheckCircle2,
+  Droplets,
+  Flame,
+  Wifi,
+  Trash2,
+  Home,
+  ChevronRight,
+  Building2,
 } from "lucide-react";
+import {
+  UtilityProviderDialog,
+  DURHAM_WATER_CONFIG,
+  DUKE_ENERGY_CONFIG,
+  ENBRIDGE_GAS_CONFIG,
+  WAKE_ELECTRIC_CONFIG,
+} from "@/components/utilities/UtilityProviderDialog";
 import {
   Card,
   CardContent,
@@ -66,6 +80,7 @@ interface UtilityBill {
   property: PropertyInfo;
 }
 
+
 interface SummaryData {
   overview: {
     totalBills: number;
@@ -90,6 +105,7 @@ interface SummaryData {
     address: string;
     total: number;
     count: number;
+    byType: Record<string, number>;
   }>;
   byTenant: Array<{
     tenantId: string;
@@ -110,6 +126,64 @@ const UTILITY_TYPES = [
   "Other",
 ];
 
+const UTILITY_ICONS: Record<string, React.ReactNode> = {
+  electric: <Zap className="h-4 w-4" />,
+  gas: <Flame className="h-4 w-4" />,
+  water: <Droplets className="h-4 w-4" />,
+  internet: <Wifi className="h-4 w-4" />,
+  trash: <Trash2 className="h-4 w-4" />,
+  sewer: <Droplets className="h-4 w-4" />,
+};
+
+const UTILITY_COLORS: Record<string, string> = {
+  electric: "text-yellow-600",
+  gas: "text-orange-500",
+  water: "text-blue-500",
+  internet: "text-purple-500",
+  trash: "text-gray-500",
+  sewer: "text-cyan-600",
+};
+
+// Provider configuration for the list
+interface ProviderConfig {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  color: string;
+  description: string;
+}
+
+const UTILITY_PROVIDERS: ProviderConfig[] = [
+  {
+    id: "durham-water",
+    name: "Durham Water",
+    icon: <Droplets className="h-5 w-5" />,
+    color: "text-blue-500",
+    description: "Water & sewer services",
+  },
+  {
+    id: "duke-energy",
+    name: "Duke Energy",
+    icon: <Zap className="h-5 w-5" />,
+    color: "text-yellow-500",
+    description: "Electric service",
+  },
+  {
+    id: "enbridge-gas",
+    name: "Enbridge Gas",
+    icon: <Flame className="h-5 w-5" />,
+    color: "text-orange-500",
+    description: "Natural gas service",
+  },
+  {
+    id: "wake-electric",
+    name: "Wake Electric",
+    icon: <Zap className="h-5 w-5" />,
+    color: "text-amber-500",
+    description: "Electric cooperative",
+  },
+];
+
 export default function UtilitiesPage() {
   const [bills, setBills] = useState<UtilityBill[]>([]);
   const [properties, setProperties] = useState<PropertyInfo[]>([]);
@@ -118,6 +192,7 @@ export default function UtilitiesPage() {
   const [filterProperty, setFilterProperty] = useState<string>("all");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [allocating, setAllocating] = useState<string | null>(null);
+  const [activeProviderDialog, setActiveProviderDialog] = useState<string | null>(null);
 
   // Form state
   const [formPropertyId, setFormPropertyId] = useState("");
@@ -224,6 +299,7 @@ export default function UtilitiesPage() {
     setFormBillingEnd("");
   };
 
+
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 
@@ -249,6 +325,32 @@ export default function UtilitiesPage() {
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      {/* Provider Dialogs */}
+      <UtilityProviderDialog
+        config={DURHAM_WATER_CONFIG}
+        open={activeProviderDialog === "durham-water"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "durham-water" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={DUKE_ENERGY_CONFIG}
+        open={activeProviderDialog === "duke-energy"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "duke-energy" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={ENBRIDGE_GAS_CONFIG}
+        open={activeProviderDialog === "enbridge-gas"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "enbridge-gas" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={WAKE_ELECTRIC_CONFIG}
+        open={activeProviderDialog === "wake-electric"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "wake-electric" : null)}
+        onImportComplete={fetchData}
+      />
+
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Utilities</h2>
         <div className="flex items-center gap-2">
@@ -434,13 +536,84 @@ export default function UtilitiesPage() {
         </Card>
       </div>
 
+      {/* Property Utility Cards */}
+      {summary?.byProperty && summary.byProperty.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Home className="h-5 w-5" />
+            Utilities by Property
+          </h3>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {summary.byProperty.map((prop) => (
+              <Card key={prop.propertyId}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base font-medium">{prop.address}</CardTitle>
+                  <div className="text-2xl font-bold">{formatCurrency(prop.total)}</div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {Object.entries(prop.byType).map(([type, amount]) => (
+                      <div key={type} className="flex items-center justify-between text-sm">
+                        <div className={`flex items-center gap-2 ${UTILITY_COLORS[type] || "text-gray-500"}`}>
+                          {UTILITY_ICONS[type] || <Zap className="h-4 w-4" />}
+                          <span className="capitalize">{type}</span>
+                        </div>
+                        <span className="font-medium">{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                    {Object.keys(prop.byType).length === 0 && (
+                      <p className="text-sm text-muted-foreground">No utility bills recorded</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      <Tabs defaultValue="bills" className="space-y-4">
+      <Tabs defaultValue="providers" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="bills">Bills</TabsTrigger>
           <TabsTrigger value="summary">Monthly Summary</TabsTrigger>
           <TabsTrigger value="tenants">Tenant Charges</TabsTrigger>
         </TabsList>
+
+        {/* Providers Tab */}
+        <TabsContent value="providers" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                Utility Providers
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y">
+                {UTILITY_PROVIDERS.map((provider) => (
+                  <div
+                    key={provider.id}
+                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => setActiveProviderDialog(provider.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`p-2 rounded-lg bg-muted ${provider.color}`}>
+                        {provider.icon}
+                      </div>
+                      <div>
+                        <div className="font-medium">{provider.name}</div>
+                        <div className="text-sm text-muted-foreground">{provider.description}</div>
+                      </div>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Bills Tab */}
         <TabsContent value="bills" className="space-y-4">
