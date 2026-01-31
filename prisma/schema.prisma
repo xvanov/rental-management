@@ -430,6 +430,166 @@ model UtilityBill {
   @@index([period])
 }
 
+// ─── Durham Water Parsed Bills ────────────────────────────────────────────
+
+enum DurhamWaterDocType {
+  BILL
+  DELINQUENCY_NOTICE
+  UNKNOWN
+}
+
+model DurhamWaterParsedBill {
+  id                 String              @id @default(cuid())
+  accountNumber      String
+  serviceLocation    String
+  documentType       DurhamWaterDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  disconnectDate     DateTime?
+  lastDayToPay       DateTime?
+  balanceForward     Float               @default(0)
+  waterCharges       Float               @default(0)
+  sewerCharges       Float               @default(0)
+  requiresAttention  Boolean             @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?        @unique
+  parsedAt           DateTime            @default(now())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Duke Energy Parsed Bills ──────────────────────────────────────────────
+
+enum DukeEnergyDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model DukeEnergyParsedBill {
+  id                 String             @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       DukeEnergyDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  billingDays        Int                @default(0)
+  kwhUsed            Float              @default(0)
+  meterNumber        String?
+  electricCharges    Float              @default(0)
+  taxes              Float              @default(0)
+  previousBalance    Float              @default(0)
+  paymentsReceived   Float              @default(0)
+  requiresAttention  Boolean            @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?       @unique
+  parsedAt           DateTime           @default(now())
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Enbridge Gas Parsed Bills ─────────────────────────────────────────────
+
+enum EnbridgeGasDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model EnbridgeGasParsedBill {
+  id                 String              @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       EnbridgeGasDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  billingDays        Int                 @default(0)
+  thermsUsed         Float               @default(0)
+  meterNumber        String?
+  gasCharges         Float               @default(0)
+  basicFacilitiesCharge Float            @default(0)
+  taxes              Float               @default(0)
+  previousBalance    Float               @default(0)
+  paymentsReceived   Float               @default(0)
+  requiresAttention  Boolean             @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?        @unique
+  parsedAt           DateTime            @default(now())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Wake Electric Parsed Bills ─────────────────────────────────────────────
+
+enum WakeElectricDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model WakeElectricParsedBill {
+  id                 String              @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       WakeElectricDocType @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  billingDays        Int                 @default(0)
+  kwhUsed            Float               @default(0)
+  meterNumber        String?
+  energyCharge       Float               @default(0)
+  facilityCharge     Float               @default(0)
+  taxes              Float               @default(0)
+  previousBalance    Float               @default(0)
+  paymentsReceived   Float               @default(0)
+  requiresAttention  Boolean             @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?        @unique
+  parsedAt           DateTime            @default(now())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
 // ─── Cleaning Assignment ───────────────────────────────────────────────────
 
 enum CleaningStatus {
