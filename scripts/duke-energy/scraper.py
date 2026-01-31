@@ -313,81 +313,59 @@ class DukeEnergyScraper:
             if not self._open_account_sidebar():
                 return False
 
-            # Account number might be displayed with spaces: 9101 7650 0588
-            account_formatted = f"{account_number[:4]} {account_number[4:8]} {account_number[8:]}" if len(account_number) == 12 else account_number
-
-            # Look for the account card/row in the sidebar
-            # The sidebar shows accounts with addresses - need to find and click the right one
-            account_selectors = [
-                f'[data-account="{account_number}"]',
-                f'[data-account-number="{account_number}"]',
-                f'div:has-text("{account_formatted}")',
-                f'button:has-text("{account_formatted}")',
-                f'a:has-text("{account_formatted}")',
-                f'li:has-text("{account_formatted}")',
-            ]
-
-            account_elem = None
-            for selector in account_selectors:
-                try:
-                    elem = self.page.query_selector(selector)
-                    if elem and elem.is_visible():
-                        account_elem = elem
-                        print(f"Found account element with selector: {selector}")
-                        break
-                except Exception as e:
-                    logger.debug(f"Selector {selector} failed: {e}")
-                    continue
-
-            if not account_elem:
-                # Try finding by partial match in sidebar content
-                sidebar_content = self.page.query_selector_all('aside, [class*="sidebar"], [class*="drawer"], [class*="panel"]')
-                for sidebar in sidebar_content:
-                    try:
-                        # Look for clickable elements containing the account number
-                        clickables = sidebar.query_selector_all('button, a, div[role="button"], li')
-                        for clickable in clickables:
-                            text = clickable.inner_text()
-                            if account_number in text.replace(' ', '') or account_formatted in text:
-                                account_elem = clickable
-                                print(f"Found account in sidebar content: {text[:50]}...")
-                                break
-                    except Exception as e:
-                        logger.debug(f"Error searching sidebar content: {e}")
-                        continue
-                    if account_elem:
-                        break
-
-            if not account_elem:
-                print(f"Could not find account {account_number} in sidebar")
-                self._save_screenshot("account_not_found.png")
-                self._close_account_sidebar()
-                return False
-
-            # Click on the account
-            account_elem.click()
             self.page.wait_for_timeout(1500)
+
+            # Duke Energy uses label elements for account selection (radio button style)
+            # Account numbers are displayed with # prefix like #910176500588
+            # Use Playwright's locator API for more reliable element finding
+            label_locator = self.page.locator(f'label:has-text("{account_number}")')
+
+            if label_locator.count() > 0:
+                print(f"Found account label, clicking...")
+                label_locator.first.click()
+                self.page.wait_for_timeout(1000)
+            else:
+                # Fallback: try other selector patterns
+                account_formatted = f"{account_number[:4]} {account_number[4:8]} {account_number[8:]}" if len(account_number) == 12 else account_number
+
+                account_selectors = [
+                    f'label:has-text("#{account_number}")',
+                    f'[data-account="{account_number}"]',
+                    f'div:has-text("{account_formatted}")',
+                ]
+
+                account_elem = None
+                for selector in account_selectors:
+                    try:
+                        locator = self.page.locator(selector)
+                        if locator.count() > 0:
+                            account_elem = locator.first
+                            print(f"Found account with selector: {selector}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"Selector {selector} failed: {e}")
+                        continue
+
+                if not account_elem:
+                    print(f"Could not find account {account_number} in sidebar")
+                    self._save_screenshot("account_not_found.png")
+                    self._close_account_sidebar()
+                    return False
+
+                account_elem.click()
+                self.page.wait_for_timeout(1000)
+
             self._save_screenshot("after_account_click.png")
 
-            # Look for "Select Account" button after clicking account card
-            select_btn_selectors = [
-                'button:has-text("Select Account")',
-                'button:has-text("Select")',
-                'a:has-text("Select Account")',
-                '[data-testid="select-account"]',
-            ]
+            # Click "Select This Account" button
+            select_btn_locator = self.page.locator('button:has-text("Select This Account"), button:has-text("Select Account")')
 
-            for selector in select_btn_selectors:
-                try:
-                    btn = self.page.query_selector(selector)
-                    if btn and btn.is_visible():
-                        print(f"Clicking Select Account button: {selector}")
-                        btn.click()
-                        self.page.wait_for_timeout(2000)
-                        break
-                except Exception as e:
-                    logger.debug(f"Select button selector {selector} failed: {e}")
-                    continue
+            if select_btn_locator.count() > 0:
+                print("Clicking Select Account button...")
+                select_btn_locator.first.click()
+                self.page.wait_for_timeout(2000)
+            else:
+                logger.warning("Could not find Select Account button")
 
             # Wait for page to load new account
             try:
@@ -531,8 +509,81 @@ class DukeEnergyScraper:
 
         return accounts
 
+    def _download_bill_via_api(self, account_number: str = None) -> Optional[str]:
+        """Download bill PDF by intercepting the invoice API response."""
+        try:
+            print("Downloading bill via API interception...")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            account_str = account_number or "unknown"
+            filename = f"duke_energy_{account_str}_{timestamp}.pdf"
+            save_path = self.download_dir / filename
+
+            invoice_data = None
+
+            def capture_invoice(response):
+                nonlocal invoice_data
+                if 'billing/invoice' in response.url:
+                    try:
+                        invoice_data = response.json()
+                    except Exception:
+                        pass
+
+            # Set up response capture
+            self.page.on('response', capture_invoice)
+
+            # Click View Bill to trigger the API call
+            view_btn = self.page.locator('button:has-text("View Bill")')
+            if view_btn.count() > 0:
+                view_btn.first.click()
+                self.page.wait_for_timeout(5000)
+
+            # Remove the listener
+            self.page.remove_listener('response', capture_invoice)
+
+            # Close any popup that opened
+            if len(self.page.context.pages) > 1:
+                for pg in self.page.context.pages[1:]:
+                    try:
+                        pg.close()
+                    except Exception:
+                        pass
+
+            if invoice_data and invoice_data.get('status') == 'Success':
+                # Extract the hex-encoded PDF
+                reply_code = invoice_data.get('invoiceImage', {}).get('MessageReply', {}).get('replyCode', '')
+                if reply_code:
+                    try:
+                        # Decode hex to bytes
+                        pdf_bytes = bytes.fromhex(reply_code)
+                        # Verify it's a PDF
+                        if pdf_bytes[:4] == b'%PDF':
+                            with open(save_path, 'wb') as f:
+                                f.write(pdf_bytes)
+                            print(f"Downloaded PDF via API: {save_path}")
+                            return str(save_path)
+                        else:
+                            print(f"Decoded data is not a PDF (starts with {pdf_bytes[:10]})")
+                    except Exception as e:
+                        print(f"Error decoding PDF hex: {e}")
+            else:
+                print(f"Invoice API did not return success: {invoice_data}")
+
+            return None
+
+        except Exception as e:
+            print(f"Error downloading bill via API: {e}")
+            traceback.print_exc()
+            return None
+
     def _download_bill_pdf(self, account_number: str = None) -> Optional[str]:
         """Download the bill PDF for the current account."""
+        # First try the API interception method (more reliable)
+        result = self._download_bill_via_api(account_number)
+        if result:
+            return result
+
+        # Fallback to the popup method
+        print("API method failed, trying popup method...")
         try:
             print("Looking for View Bill button...")
             self._save_screenshot("before_view_bill.png")
@@ -589,9 +640,71 @@ class DukeEnergyScraper:
             if new_pages > initial_pages:
                 print("New tab opened, checking for PDF...")
                 new_page = self.page.context.pages[-1]
-                new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+
+                # Wait for the new tab to actually load - it may start as about:blank
+                # and then navigate to the PDF URL via JavaScript
                 pdf_url = new_page.url
-                print(f"New tab URL: {pdf_url}")
+                print(f"Initial new tab URL: {pdf_url}")
+
+                # Poll for URL change if it starts as about:blank
+                if pdf_url == 'about:blank':
+                    print("Waiting for PDF to load in new tab...")
+                    for _ in range(20):  # Wait up to 10 seconds
+                        new_page.wait_for_timeout(500)
+                        pdf_url = new_page.url
+                        if pdf_url != 'about:blank':
+                            print(f"New tab URL changed to: {pdf_url}")
+                            break
+                    else:
+                        # Still about:blank - try waiting for load state
+                        try:
+                            new_page.wait_for_load_state("load", timeout=10000)
+                            pdf_url = new_page.url
+                            print(f"After load state, URL: {pdf_url}")
+                        except PlaywrightTimeout:
+                            print("Timeout waiting for new tab to load")
+
+                # Try waiting for network idle
+                if pdf_url == 'about:blank':
+                    try:
+                        new_page.wait_for_load_state("networkidle", timeout=15000)
+                        pdf_url = new_page.url
+                        print(f"After networkidle, URL: {pdf_url}")
+                    except PlaywrightTimeout:
+                        pass
+
+                # Duke Energy shows "Please wait..." while loading PDF
+                # Wait for loading text to disappear and PDF to appear
+                if pdf_url == 'about:blank':
+                    print("Waiting for PDF viewer to load (may show 'Please wait...')...")
+                    for attempt in range(30):  # Wait up to 30 seconds
+                        new_page.wait_for_timeout(1000)
+                        page_content = new_page.content()
+
+                        # Check if still loading
+                        if 'please wait' in page_content.lower():
+                            if attempt % 5 == 0:
+                                print(f"  Still loading... ({attempt}s)")
+                            continue
+
+                        # Check if URL changed to blob
+                        pdf_url = new_page.url
+                        if pdf_url.startswith('blob:'):
+                            print(f"PDF loaded as blob URL: {pdf_url[:50]}...")
+                            break
+
+                        # Check for embedded PDF or iframe with PDF
+                        if '<embed' in page_content or '<iframe' in page_content or '<object' in page_content:
+                            print("Found embedded content in page")
+                            break
+
+                        # Check for PDF.js or similar viewer
+                        if 'pdf' in page_content.lower() and 'viewer' in page_content.lower():
+                            print("Found PDF viewer")
+                            break
+
+                    pdf_url = new_page.url
+                    print(f"Final URL after waiting: {pdf_url}")
 
                 # Take screenshot from the new page
                 if self.debug_screenshots:
