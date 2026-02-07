@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { propertyId, provider, type, amount, billingStart, billingEnd, period } = body;
+    const { propertyId, provider, type, amount, billingStart, billingEnd, period, note } = body;
 
     if (!propertyId || !provider || !type || amount === undefined || !billingStart || !billingEnd) {
       return NextResponse.json(
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
         billingStart: new Date(billingStart),
         billingEnd: billEnd,
         period: derivedPeriod,
+        note: note || null,
       },
       include: {
         property: true,
@@ -95,6 +96,54 @@ export async function POST(req: NextRequest) {
     console.error("Failed to create utility bill:", error);
     return NextResponse.json(
       { error: "Failed to create utility bill" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id, amount, period, billingStart, billingEnd, note } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id is required" },
+        { status: 400 }
+      );
+    }
+
+    // Build update data - only include fields that are provided
+    const updateData: Prisma.UtilityBillUpdateInput = {};
+
+    if (amount !== undefined) {
+      if (parseFloat(amount) <= 0) {
+        return NextResponse.json(
+          { error: "Amount must be positive" },
+          { status: 400 }
+        );
+      }
+      updateData.amount = parseFloat(amount);
+    }
+
+    if (period !== undefined) updateData.period = period;
+    if (billingStart !== undefined) updateData.billingStart = new Date(billingStart);
+    if (billingEnd !== undefined) updateData.billingEnd = new Date(billingEnd);
+    if (note !== undefined) updateData.note = note || null;
+
+    const bill = await prisma.utilityBill.update({
+      where: { id },
+      data: updateData,
+      include: {
+        property: true,
+      },
+    });
+
+    return NextResponse.json(bill);
+  } catch (error) {
+    console.error("Failed to update utility bill:", error);
+    return NextResponse.json(
+      { error: "Failed to update utility bill" },
       { status: 500 }
     );
   }

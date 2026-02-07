@@ -10,6 +10,7 @@ import {
   Droplets,
   Zap,
   Flame,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,7 +57,7 @@ export interface UtilityBill {
 
 export interface UtilityProviderConfig {
   name: string;
-  type: "water" | "electric" | "gas";
+  type: "water" | "electric" | "gas" | "internet";
   apiEndpoint: string;
   icon: React.ReactNode;
   iconColor: string;
@@ -424,4 +425,40 @@ export const WAKE_ELECTRIC_CONFIG: UtilityProviderConfig = {
   icon: <Zap className="h-5 w-5" />,
   iconColor: "text-green-500",
   credentialsEnvPrefix: "WAKE_ELECTRIC",
+};
+
+export const GRAHAM_UTILITIES_CONFIG: UtilityProviderConfig = {
+  name: "Graham Utilities",
+  type: "water",
+  apiEndpoint: "/api/utilities/graham-utilities",
+  icon: <Droplets className="h-5 w-5" />,
+  iconColor: "text-cyan-500",
+  credentialsEnvPrefix: "GRAHAM_UTILITIES",
+};
+
+export const SMUD_CONFIG: UtilityProviderConfig = {
+  name: "SMUD",
+  type: "electric",
+  apiEndpoint: "/api/utilities/smud",
+  icon: <Zap className="h-5 w-5" />,
+  iconColor: "text-purple-500",
+  credentialsEnvPrefix: "SMUD",
+};
+
+export const SPECTRUM_CONFIG: UtilityProviderConfig = {
+  name: "Spectrum",
+  type: "internet",
+  apiEndpoint: "/api/utilities/spectrum",
+  icon: <Wifi className="h-5 w-5" />,
+  iconColor: "text-blue-600",
+  credentialsEnvPrefix: "SPECTRUM",
+};
+
+export const XFINITY_CONFIG: UtilityProviderConfig = {
+  name: "Xfinity",
+  type: "internet",
+  apiEndpoint: "/api/utilities/xfinity",
+  icon: <Wifi className="h-5 w-5" />,
+  iconColor: "text-purple-600",
+  credentialsEnvPrefix: "XFINITY_INTERENT",
 };

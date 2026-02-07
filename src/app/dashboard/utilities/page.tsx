@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
 import {
   Zap,
   Plus,
   DollarSign,
-  ArrowRightLeft,
   Clock,
   CheckCircle2,
   Droplets,
@@ -13,15 +14,24 @@ import {
   Wifi,
   Trash2,
   Home,
-  ChevronRight,
   Building2,
+  ExternalLink,
+  Phone,
+  Pencil,
+  ArrowUpDown,
+  Calculator,
 } from "lucide-react";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import {
   UtilityProviderDialog,
   DURHAM_WATER_CONFIG,
   DUKE_ENERGY_CONFIG,
   ENBRIDGE_GAS_CONFIG,
   WAKE_ELECTRIC_CONFIG,
+  GRAHAM_UTILITIES_CONFIG,
+  SMUD_CONFIG,
+  SPECTRUM_CONFIG,
+  XFINITY_CONFIG,
 } from "@/components/utilities/UtilityProviderDialog";
 import {
   Card,
@@ -42,10 +52,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -66,6 +79,15 @@ interface PropertyInfo {
   state: string;
 }
 
+interface UtilityProvider {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  website: string | null;
+  phone: string | null;
+}
+
 interface UtilityBill {
   id: string;
   propertyId: string;
@@ -76,8 +98,65 @@ interface UtilityBill {
   billingEnd: string;
   period: string;
   allocated: boolean;
+  note: string | null;
   createdAt: string;
   property: PropertyInfo;
+}
+
+interface TenantSplit {
+  tenantId: string;
+  name: string;
+  unit: string;
+  weight: number;
+  totalOwed: number;
+}
+
+interface TenantSplitData {
+  period: string;
+  grandTotal: number;
+  tenantSummary: TenantSplit[];
+}
+
+// Dynamic tenant shares interfaces
+interface TenantUtilityShare {
+  tenantId: string;
+  tenantName: string;
+  unitName: string;
+  occupantCount: number;
+  moveInDate: string | null;
+  moveOutDate: string | null;
+  sharePercentage: number;
+  proRatedFactor: number;
+  calculatedAmount: number;
+  bills: Array<{
+    billId: string;
+    provider: string;
+    type: string;
+    totalAmount: number;
+    tenantShare: number;
+  }>;
+}
+
+interface PropertyUtilitySummary {
+  propertyId: string;
+  propertyAddress: string;
+  period: string;
+  totalBillAmount: number;
+  totalOccupants: number;
+  tenantShares: TenantUtilityShare[];
+  bills: Array<{
+    id: string;
+    provider: string;
+    type: string;
+    amount: number;
+    billingStart: string;
+    billingEnd: string;
+  }>;
+}
+
+interface TenantSharesResponse {
+  period: string;
+  properties: PropertyUtilitySummary[];
 }
 
 
@@ -115,16 +194,6 @@ interface SummaryData {
     count: number;
   }>;
 }
-
-const UTILITY_TYPES = [
-  "Electric",
-  "Gas",
-  "Water",
-  "Internet",
-  "Trash",
-  "Sewer",
-  "Other",
-];
 
 const UTILITY_ICONS: Record<string, React.ReactNode> = {
   electric: <Zap className="h-4 w-4" />,
@@ -182,25 +251,99 @@ const UTILITY_PROVIDERS: ProviderConfig[] = [
     color: "text-amber-500",
     description: "Electric cooperative",
   },
+  {
+    id: "graham-utilities",
+    name: "Graham Utilities",
+    icon: <Droplets className="h-5 w-5" />,
+    color: "text-cyan-500",
+    description: "Water, sewer & refuse (City of Graham)",
+  },
+  {
+    id: "smud",
+    name: "SMUD",
+    icon: <Zap className="h-5 w-5" />,
+    color: "text-purple-500",
+    description: "Sacramento electric utility",
+  },
+  {
+    id: "spectrum",
+    name: "Spectrum",
+    icon: <Wifi className="h-5 w-5" />,
+    color: "text-blue-600",
+    description: "Internet service",
+  },
+  {
+    id: "xfinity",
+    name: "Xfinity",
+    icon: <Wifi className="h-5 w-5" />,
+    color: "text-purple-600",
+    description: "Internet service (Comcast)",
+  },
 ];
+
+// Get current period as YYYY-MM
+const getCurrentPeriod = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function UtilitiesPage() {
   const [bills, setBills] = useState<UtilityBill[]>([]);
   const [properties, setProperties] = useState<PropertyInfo[]>([]);
+  const [providers, setProviders] = useState<UtilityProvider[]>([]);
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [tenantSplits, setTenantSplits] = useState<TenantSplitData | null>(null);
+  const [tenantShares, setTenantShares] = useState<TenantSharesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [filterProperty, setFilterProperty] = useState<string>("all");
+  const [filterPeriod, setFilterPeriod] = useState<string>(getCurrentPeriod());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [allocating, setAllocating] = useState<string | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingBill, setEditingBill] = useState<UtilityBill | null>(null);
   const [activeProviderDialog, setActiveProviderDialog] = useState<string | null>(null);
 
-  // Form state
+  // Sorting state
+  const [billsSort, setBillsSort] = useState<{ column: string; direction: "asc" | "desc" }>({
+    column: "billingEnd",
+    direction: "desc",
+  });
+
+  // Form state for adding bills
   const [formPropertyId, setFormPropertyId] = useState("");
-  const [formProvider, setFormProvider] = useState("");
-  const [formType, setFormType] = useState("");
+  const [formProviderId, setFormProviderId] = useState("");
+  const [formManualType, setFormManualType] = useState("");
+  const [formNote, setFormNote] = useState("");
   const [formAmount, setFormAmount] = useState("");
-  const [formBillingStart, setFormBillingStart] = useState("");
-  const [formBillingEnd, setFormBillingEnd] = useState("");
+  const [formBillingDateRange, setFormBillingDateRange] = useState<DateRange | undefined>();
+
+  // Edit form state
+  const [editAmount, setEditAmount] = useState("");
+  const [editPeriod, setEditPeriod] = useState("");
+  const [editNote, setEditNote] = useState("");
+
+  // Check if Manual entry is selected
+  const isManualEntry = formProviderId === "manual";
+
+  // Get the selected provider's type (or manual type if Manual is selected)
+  const selectedProvider = providers.find((p) => p.id === formProviderId);
+  const formType = isManualEntry ? formManualType : (selectedProvider?.type || "");
+
+  // Group properties by state -> city
+  const groupedProperties = useMemo(() => {
+    const groups: Record<string, Record<string, PropertyInfo[]>> = {};
+    for (const prop of properties) {
+      if (!groups[prop.state]) groups[prop.state] = {};
+      if (!groups[prop.state][prop.city]) groups[prop.state][prop.city] = [];
+      groups[prop.state][prop.city].push(prop);
+    }
+    // Sort addresses within each city
+    for (const state of Object.keys(groups)) {
+      for (const city of Object.keys(groups[state])) {
+        groups[state][city].sort((a, b) => a.address.localeCompare(b.address));
+      }
+    }
+    return groups;
+  }, [properties]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -209,11 +352,15 @@ export default function UtilitiesPage() {
       if (filterProperty && filterProperty !== "all") {
         params.set("propertyId", filterProperty);
       }
+      if (filterPeriod) {
+        params.set("period", filterPeriod);
+      }
 
-      const [billsRes, propsRes, summaryRes] = await Promise.all([
+      const [billsRes, propsRes, summaryRes, providersRes] = await Promise.all([
         fetch(`/api/utilities?${params.toString()}`),
         fetch("/api/properties"),
         fetch(`/api/utilities/summary?${params.toString()}`),
+        fetch("/api/utilities/providers"),
       ]);
 
       if (billsRes.ok) {
@@ -228,21 +375,142 @@ export default function UtilitiesPage() {
         const data = await summaryRes.json();
         setSummary(data);
       }
+      if (providersRes.ok) {
+        const data = await providersRes.json();
+        setProviders(data.providers);
+      }
+
+      // Fetch tenant splits if a property is selected
+      if (filterProperty && filterProperty !== "all") {
+        const splitsParams = new URLSearchParams();
+        splitsParams.set("propertyId", filterProperty);
+        if (filterPeriod) splitsParams.set("period", filterPeriod);
+
+        const splitsRes = await fetch(`/api/utilities/tenant-splits?${splitsParams.toString()}`);
+        if (splitsRes.ok) {
+          const data = await splitsRes.json();
+          setTenantSplits(data);
+        }
+      } else {
+        setTenantSplits(null);
+      }
+
+      // Fetch dynamic tenant shares (for Tenant Charges tab)
+      const sharesParams = new URLSearchParams();
+      if (filterProperty && filterProperty !== "all") {
+        sharesParams.set("propertyId", filterProperty);
+      }
+      if (filterPeriod) {
+        sharesParams.set("period", filterPeriod);
+      }
+      const sharesRes = await fetch(`/api/utilities/tenant-shares?${sharesParams.toString()}`);
+      if (sharesRes.ok) {
+        const data = await sharesRes.json();
+        setTenantShares(data);
+      }
     } catch (error) {
       console.error("Failed to fetch utilities data:", error);
     } finally {
       setLoading(false);
     }
-  }, [filterProperty]);
+  }, [filterProperty, filterPeriod]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
+  // Handle bill editing
+  const openEditDialog = (bill: UtilityBill) => {
+    setEditingBill(bill);
+    setEditAmount(bill.amount.toString());
+    setEditPeriod(bill.period);
+    setEditNote(bill.note || "");
+    setEditDialogOpen(true);
+  };
+
+  const handleEditBill = async () => {
+    if (!editingBill) return;
+
+    try {
+      const res = await fetch("/api/utilities", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingBill.id,
+          amount: parseFloat(editAmount),
+          period: editPeriod,
+          note: editNote.trim() || null,
+        }),
+      });
+
+      if (res.ok) {
+        setEditDialogOpen(false);
+        setEditingBill(null);
+        fetchData();
+      }
+    } catch (error) {
+      console.error("Failed to update bill:", error);
+    }
+  };
+
+  // Sorting helper
+  const sortBills = (billsToSort: UtilityBill[]) => {
+    return [...billsToSort].sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+
+      switch (billsSort.column) {
+        case "period":
+          aVal = a.period;
+          bVal = b.period;
+          break;
+        case "property":
+          aVal = a.property.address;
+          bVal = b.property.address;
+          break;
+        case "provider":
+          aVal = a.provider;
+          bVal = b.provider;
+          break;
+        case "type":
+          aVal = a.type;
+          bVal = b.type;
+          break;
+        case "amount":
+          aVal = a.amount;
+          bVal = b.amount;
+          break;
+        case "billingEnd":
+        default:
+          aVal = new Date(a.billingEnd).getTime();
+          bVal = new Date(b.billingEnd).getTime();
+      }
+
+      if (aVal < bVal) return billsSort.direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return billsSort.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+  };
+
+  const toggleSort = (column: string) => {
+    setBillsSort((prev) => ({
+      column,
+      direction: prev.column === column && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
   const handleAddBill = async () => {
-    if (!formPropertyId || !formProvider || !formType || !formAmount || !formBillingStart || !formBillingEnd) {
+    if (!formPropertyId || !formProviderId || !formType || !formAmount || !formBillingDateRange?.from || !formBillingDateRange?.to) {
       return;
     }
+
+    // For manual entries, require a note
+    if (isManualEntry && !formNote.trim()) {
+      return;
+    }
+
+    const provider = isManualEntry ? null : providers.find((p) => p.id === formProviderId);
+    if (!isManualEntry && !provider) return;
 
     try {
       const res = await fetch("/api/utilities", {
@@ -250,11 +518,12 @@ export default function UtilitiesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           propertyId: formPropertyId,
-          provider: formProvider,
+          provider: isManualEntry ? "Manual" : provider!.name,
           type: formType,
           amount: formAmount,
-          billingStart: formBillingStart,
-          billingEnd: formBillingEnd,
+          billingStart: format(formBillingDateRange.from, "yyyy-MM-dd"),
+          billingEnd: format(formBillingDateRange.to, "yyyy-MM-dd"),
+          note: formNote.trim() || null,
         }),
       });
 
@@ -268,35 +537,13 @@ export default function UtilitiesPage() {
     }
   };
 
-  const handleAllocate = async (billId: string) => {
-    setAllocating(billId);
-    try {
-      const res = await fetch("/api/utilities/allocate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ billId }),
-      });
-
-      if (res.ok) {
-        fetchData();
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to allocate bill");
-      }
-    } catch (error) {
-      console.error("Failed to allocate utility bill:", error);
-    } finally {
-      setAllocating(null);
-    }
-  };
-
   const resetForm = () => {
     setFormPropertyId("");
-    setFormProvider("");
-    setFormType("");
+    setFormProviderId("");
+    setFormManualType("");
+    setFormNote("");
     setFormAmount("");
-    setFormBillingStart("");
-    setFormBillingEnd("");
+    setFormBillingDateRange(undefined);
   };
 
 
@@ -350,20 +597,57 @@ export default function UtilitiesPage() {
         onOpenChange={(open) => setActiveProviderDialog(open ? "wake-electric" : null)}
         onImportComplete={fetchData}
       />
+      <UtilityProviderDialog
+        config={GRAHAM_UTILITIES_CONFIG}
+        open={activeProviderDialog === "graham-utilities"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "graham-utilities" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={SMUD_CONFIG}
+        open={activeProviderDialog === "smud"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "smud" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={SPECTRUM_CONFIG}
+        open={activeProviderDialog === "spectrum"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "spectrum" : null)}
+        onImportComplete={fetchData}
+      />
+      <UtilityProviderDialog
+        config={XFINITY_CONFIG}
+        open={activeProviderDialog === "xfinity"}
+        onOpenChange={(open) => setActiveProviderDialog(open ? "xfinity" : null)}
+        onImportComplete={fetchData}
+      />
 
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">Utilities</h2>
         <div className="flex items-center gap-2">
+          <Input
+            type="month"
+            value={filterPeriod}
+            onChange={(e) => setFilterPeriod(e.target.value)}
+            className="w-[150px]"
+          />
           <Select value={filterProperty} onValueChange={setFilterProperty}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All Properties" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Properties</SelectItem>
-              {properties.map((prop) => (
-                <SelectItem key={prop.id} value={prop.id}>
-                  {prop.address}
-                </SelectItem>
+              {Object.entries(groupedProperties).sort().map(([state, cities]) => (
+                <SelectGroup key={state}>
+                  <SelectLabel className="text-xs text-muted-foreground font-semibold">{state}</SelectLabel>
+                  {Object.entries(cities).sort().map(([city, props]) => (
+                    props.map((prop) => (
+                      <SelectItem key={prop.id} value={prop.id} className="pl-4">
+                        {prop.address}, {city}
+                      </SelectItem>
+                    ))
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
@@ -389,10 +673,17 @@ export default function UtilitiesPage() {
                       <SelectValue placeholder="Select property" />
                     </SelectTrigger>
                     <SelectContent>
-                      {properties.map((prop) => (
-                        <SelectItem key={prop.id} value={prop.id}>
-                          {prop.address}
-                        </SelectItem>
+                      {Object.entries(groupedProperties).sort().map(([state, cities]) => (
+                        <SelectGroup key={state}>
+                          <SelectLabel className="text-xs text-muted-foreground font-semibold">{state}</SelectLabel>
+                          {Object.entries(cities).sort().map(([city, props]) => (
+                            props.map((prop) => (
+                              <SelectItem key={prop.id} value={prop.id} className="pl-4">
+                                {prop.address}, {city}
+                              </SelectItem>
+                            ))
+                          ))}
+                        </SelectGroup>
                       ))}
                     </SelectContent>
                   </Select>
@@ -400,27 +691,50 @@ export default function UtilitiesPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="provider">Provider</Label>
-                    <Input
-                      id="provider"
-                      placeholder="e.g., Duke Energy"
-                      value={formProvider}
-                      onChange={(e) => setFormProvider(e.target.value)}
-                    />
+                    <Select value={formProviderId} onValueChange={(val) => {
+                      setFormProviderId(val);
+                      if (val !== "manual") setFormManualType("");
+                    }}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual" className="font-medium text-orange-600">
+                          Manual (Custom Entry)
+                        </SelectItem>
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-muted-foreground">Providers</SelectLabel>
+                          {providers.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="type">Type</Label>
-                    <Select value={formType} onValueChange={setFormType}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {UTILITY_TYPES.map((t) => (
-                          <SelectItem key={t} value={t.toLowerCase()}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {isManualEntry ? (
+                      <Select value={formManualType} onValueChange={setFormManualType}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="electric">Electric</SelectItem>
+                          <SelectItem value="gas">Gas</SelectItem>
+                          <SelectItem value="water">Water</SelectItem>
+                          <SelectItem value="internet">Internet</SelectItem>
+                          <SelectItem value="trash">Trash</SelectItem>
+                          <SelectItem value="sewer">Sewer</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="flex items-center h-10 px-3 rounded-md border bg-muted text-muted-foreground capitalize">
+                        {formType || "Auto-detected"}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="grid gap-2">
@@ -435,25 +749,27 @@ export default function UtilitiesPage() {
                     onChange={(e) => setFormAmount(e.target.value)}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                {isManualEntry && (
                   <div className="grid gap-2">
-                    <Label htmlFor="billingStart">Billing Start</Label>
-                    <Input
-                      id="billingStart"
-                      type="date"
-                      value={formBillingStart}
-                      onChange={(e) => setFormBillingStart(e.target.value)}
+                    <Label htmlFor="note">Note <span className="text-red-500">*</span></Label>
+                    <Textarea
+                      id="note"
+                      placeholder="Explain what this charge is for..."
+                      value={formNote}
+                      onChange={(e) => setFormNote(e.target.value)}
+                      rows={2}
                     />
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="billingEnd">Billing End</Label>
-                    <Input
-                      id="billingEnd"
-                      type="date"
-                      value={formBillingEnd}
-                      onChange={(e) => setFormBillingEnd(e.target.value)}
-                    />
-                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label>Billing Period</Label>
+                  <DateRangePicker
+                    value={formBillingDateRange}
+                    onChange={setFormBillingDateRange}
+                    placeholder="Select billing period"
+                    fromLabel="Start"
+                    toLabel="End"
+                  />
                 </div>
               </div>
               <DialogFooter>
@@ -462,15 +778,108 @@ export default function UtilitiesPage() {
                 </Button>
                 <Button
                   onClick={handleAddBill}
-                  disabled={!formPropertyId || !formProvider || !formType || !formAmount || !formBillingStart || !formBillingEnd}
+                  disabled={!formPropertyId || !formProviderId || !formType || !formAmount || !formBillingDateRange?.from || !formBillingDateRange?.to || (isManualEntry && !formNote.trim())}
                 >
                   Add Bill
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* Edit Bill Dialog */}
+          <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Edit Utility Bill</DialogTitle>
+                <DialogDescription>
+                  Modify the bill details. Changes will be saved immediately.
+                </DialogDescription>
+              </DialogHeader>
+              {editingBill && (
+                <div className="grid gap-4 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    <strong>{editingBill.provider}</strong> - {editingBill.property.address}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="editAmount">Amount</Label>
+                      <Input
+                        id="editAmount"
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="editPeriod">Period</Label>
+                      <Input
+                        id="editPeriod"
+                        type="month"
+                        value={editPeriod}
+                        onChange={(e) => setEditPeriod(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="editNote">Note</Label>
+                    <Textarea
+                      id="editNote"
+                      placeholder="Optional note..."
+                      value={editNote}
+                      onChange={(e) => setEditNote(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleEditBill} disabled={!editAmount || parseFloat(editAmount) <= 0}>
+                  Save Changes
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
+
+      {/* Tenant Split Card - Show when property is selected */}
+      {tenantSplits && tenantSplits.tenantSummary.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Calculator className="h-5 w-5" />
+              Tenant Bill Split - {formatPeriod(tenantSplits.period)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {tenantSplits.tenantSummary.map((tenant) => (
+                <div key={tenant.tenantId} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <div className="font-medium">{tenant.name}</div>
+                    <div className="text-sm text-muted-foreground">{tenant.unit}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Weight: {(tenant.weight * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="text-lg font-bold">
+                    {formatCurrency(tenant.totalOwed)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 pt-4 border-t flex justify-between items-center">
+              <span className="text-muted-foreground">Total for period:</span>
+              <span className="text-xl font-bold">{formatCurrency(tenantSplits.grandTotal)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
@@ -591,26 +1000,86 @@ export default function UtilitiesPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="divide-y">
-                {UTILITY_PROVIDERS.map((provider) => (
-                  <div
-                    key={provider.id}
-                    className="flex items-center justify-between p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => setActiveProviderDialog(provider.id)}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`p-2 rounded-lg bg-muted ${provider.color}`}>
-                        {provider.icon}
-                      </div>
-                      <div>
-                        <div className="font-medium">{provider.name}</div>
-                        <div className="text-sm text-muted-foreground">{provider.description}</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                ))}
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Website</TableHead>
+                    <TableHead>Import Bills</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {providers.map((provider) => {
+                    const providerSlug = provider.name.toLowerCase().replace(/\s+/g, "-");
+                    const hasImporter = UTILITY_PROVIDERS.some((p) => p.id === providerSlug);
+                    return (
+                      <TableRow key={provider.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg bg-muted ${UTILITY_COLORS[provider.type] || "text-gray-500"}`}>
+                              {UTILITY_ICONS[provider.type] || <Zap className="h-4 w-4" />}
+                            </div>
+                            <div>
+                              <div className="font-medium">{provider.name}</div>
+                              {provider.description && (
+                                <div className="text-sm text-muted-foreground">{provider.description}</div>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="capitalize">
+                            {provider.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {provider.phone ? (
+                            <a
+                              href={`tel:${provider.phone.replace(/[^0-9+]/g, "")}`}
+                              className="flex items-center gap-2 text-sm hover:underline"
+                            >
+                              <Phone className="h-4 w-4 text-muted-foreground" />
+                              {provider.phone}
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {provider.website ? (
+                            <a
+                              href={provider.website}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                              Visit Site
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {hasImporter ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setActiveProviderDialog(providerSlug)}
+                            >
+                              Import
+                            </Button>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">Manual only</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
@@ -621,8 +1090,8 @@ export default function UtilitiesPage() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-10">
                 <Zap className="h-10 w-10 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No utility bills found</p>
-                <p className="text-sm text-muted-foreground">Add a bill to get started</p>
+                <p className="text-muted-foreground">No utility bills found for {formatPeriod(filterPeriod)}</p>
+                <p className="text-sm text-muted-foreground">Add a bill or change the period filter</p>
               </CardContent>
             </Card>
           ) : (
@@ -631,24 +1100,55 @@ export default function UtilitiesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Period</TableHead>
-                      <TableHead>Property</TableHead>
-                      <TableHead>Provider</TableHead>
-                      <TableHead>Type</TableHead>
+                      <TableHead>
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort("period")} className="h-8 px-2">
+                          Period
+                          <ArrowUpDown className="ml-1 h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                      <TableHead>
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort("property")} className="h-8 px-2">
+                          Property
+                          <ArrowUpDown className="ml-1 h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                      <TableHead>
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort("provider")} className="h-8 px-2">
+                          Provider
+                          <ArrowUpDown className="ml-1 h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                      <TableHead>
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort("type")} className="h-8 px-2">
+                          Type
+                          <ArrowUpDown className="ml-1 h-3 w-3" />
+                        </Button>
+                      </TableHead>
                       <TableHead>Billing Period</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => toggleSort("amount")} className="h-8 px-2">
+                          Amount
+                          <ArrowUpDown className="ml-1 h-3 w-3" />
+                        </Button>
+                      </TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bills.map((bill) => (
+                    {sortBills(bills).map((bill) => (
                       <TableRow key={bill.id}>
                         <TableCell className="font-medium">
                           {formatPeriod(bill.period)}
                         </TableCell>
                         <TableCell>{bill.property.address}</TableCell>
-                        <TableCell>{bill.provider}</TableCell>
+                        <TableCell>
+                          {bill.provider}
+                          {bill.note && (
+                            <div className="text-xs text-muted-foreground mt-1 max-w-[150px] truncate" title={bill.note}>
+                              {bill.note}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="capitalize">
                             {bill.type}
@@ -661,30 +1161,14 @@ export default function UtilitiesPage() {
                           {formatCurrency(bill.amount)}
                         </TableCell>
                         <TableCell>
-                          {bill.allocated ? (
-                            <Badge variant="default" className="bg-green-600">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Allocated
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-amber-600 border-amber-600">
-                              <Clock className="h-3 w-3 mr-1" />
-                              Pending
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {!bill.allocated && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleAllocate(bill.id)}
-                              disabled={allocating === bill.id}
-                            >
-                              <ArrowRightLeft className="h-3 w-3 mr-1" />
-                              {allocating === bill.id ? "Allocating..." : "Allocate"}
-                            </Button>
-                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditDialog(bill)}
+                            title="Edit bill"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -819,51 +1303,116 @@ export default function UtilitiesPage() {
 
         {/* Tenant Charges Tab */}
         <TabsContent value="tenants" className="space-y-4">
-          {summary?.byTenant && summary.byTenant.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Utility Charges by Tenant</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tenant</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead className="text-right">Charges</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Avg/Charge</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {summary.byTenant.map((row) => (
-                      <TableRow key={row.tenantId}>
-                        <TableCell className="font-medium">
-                          {row.name}
-                        </TableCell>
-                        <TableCell>{row.unit}</TableCell>
-                        <TableCell className="text-right">
-                          {row.count}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(row.total)}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {formatCurrency(row.total / row.count)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+          {tenantShares?.properties && tenantShares.properties.length > 0 ? (
+            <>
+              {tenantShares.properties.map((property) => (
+                <Card key={property.propertyId}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Home className="h-5 w-5" />
+                        {property.propertyAddress}
+                      </CardTitle>
+                      <div className="text-right">
+                        <div className="text-sm text-muted-foreground">
+                          Total Bills: {formatCurrency(property.totalBillAmount)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {property.totalOccupants} occupant{property.totalOccupants !== 1 ? "s" : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {property.tenantShares.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Tenant</TableHead>
+                            <TableHead>Unit</TableHead>
+                            <TableHead className="text-center">Occupants</TableHead>
+                            <TableHead className="text-right">Share %</TableHead>
+                            <TableHead className="text-right">Pro-rated</TableHead>
+                            <TableHead className="text-right">Amount Due</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {property.tenantShares.map((tenant) => (
+                            <TableRow key={tenant.tenantId}>
+                              <TableCell className="font-medium">
+                                {tenant.tenantName}
+                              </TableCell>
+                              <TableCell>{tenant.unitName}</TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="secondary">
+                                  {tenant.occupantCount} {tenant.occupantCount === 1 ? "person" : "people"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {(tenant.sharePercentage * 100).toFixed(1)}%
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {tenant.proRatedFactor < 1 ? (
+                                  <Badge variant="outline" className="text-amber-600">
+                                    {(tenant.proRatedFactor * 100).toFixed(0)}%
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">100%</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-lg">
+                                {formatCurrency(tenant.calculatedAmount)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-4 text-center">
+                        No active tenants at this property
+                      </p>
+                    )}
+
+                    {/* Bill breakdown */}
+                    {property.bills.length > 0 && (
+                      <div className="mt-4 pt-4 border-t">
+                        <p className="text-sm font-medium mb-2">Bills included:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {property.bills.map((bill) => (
+                            <Badge key={bill.id} variant="outline" className="text-xs">
+                              {bill.provider} ({bill.type}): {formatCurrency(bill.amount)}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+
+              {/* Grand total across all properties */}
+              {tenantShares.properties.length > 1 && (
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium">Total across all properties:</span>
+                      <span className="text-xl font-bold">
+                        {formatCurrency(
+                          tenantShares.properties.reduce((sum, p) => sum + p.totalBillAmount, 0)
+                        )}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
           ) : (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-10">
-                <ArrowRightLeft className="h-10 w-10 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No tenant utility charges found</p>
+                <Calculator className="h-10 w-10 text-muted-foreground mb-4" />
+                <p className="text-muted-foreground">No tenant utility charges for {formatPeriod(filterPeriod)}</p>
                 <p className="text-sm text-muted-foreground">
-                  Allocate utility bills to split costs among tenants
+                  Add utility bills to see automatic tenant splits based on occupant count
                 </p>
               </CardContent>
             </Card>
