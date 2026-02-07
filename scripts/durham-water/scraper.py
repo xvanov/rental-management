@@ -17,6 +17,10 @@ import requests
 from models import AccountInfo, FetchResult, WaterBillData
 from parser import parse_pdf
 
+# Add parent directory to path for lib imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from lib.bill_storage import save_bill_pdf
+
 
 class DurhamWaterScraper:
     """Scraper for Durham Water utility portal."""
@@ -32,6 +36,31 @@ class DurhamWaterScraper:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self.browser: Optional[Browser] = None
         self.page: Optional[Page] = None
+
+    def _copy_to_standard_location(self, pdf_path: str, service_location: str, billing_date: datetime = None) -> str:
+        """Copy the PDF to the standardized bill storage location."""
+        try:
+            if not service_location:
+                print(f"  Warning: No service location for standardized storage")
+                return pdf_path
+
+            if not billing_date:
+                billing_date = datetime.now()
+
+            with open(pdf_path, 'rb') as f:
+                pdf_content = f.read()
+
+            standard_path = save_bill_pdf(
+                address=service_location,
+                provider="Durham Water",
+                billing_date=billing_date,
+                pdf_content=pdf_content
+            )
+            print(f"  Copied to standard location: {standard_path}")
+            return standard_path
+        except Exception as e:
+            print(f"  Warning: Could not copy to standard location: {e}")
+            return pdf_path
 
     def _setup_browser(self, playwright, headless: bool = True):
         """Set up the browser with download handling."""
@@ -538,6 +567,13 @@ class DurhamWaterScraper:
                 for pdf_path in downloaded_pdfs:
                     try:
                         bill_data = parse_pdf(pdf_path)
+                        # Copy to standardized location
+                        billing_date = bill_data.billing_period_end or bill_data.bill_date or datetime.now().date()
+                        if isinstance(billing_date, str):
+                            billing_date = datetime.strptime(billing_date, "%Y-%m-%d").date()
+                        billing_datetime = datetime.combine(billing_date, datetime.min.time()) if hasattr(billing_date, 'year') else datetime.now()
+                        std_path = self._copy_to_standard_location(pdf_path, bill_data.service_location, billing_datetime)
+                        bill_data.pdf_path = std_path
                         result.bills.append(bill_data)
                     except Exception as e:
                         result.errors.append(f"Error parsing PDF {pdf_path}: {e}")
