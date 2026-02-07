@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
 import {
   ArrowLeft,
   Download,
@@ -22,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 interface TenantSummary {
   id: string;
@@ -46,8 +49,7 @@ export default function CourtPacketPage() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
 
   // Fetch tenant data for preview
   const fetchTenant = useCallback(async () => {
@@ -74,8 +76,8 @@ export default function CourtPacketPage() {
 
     try {
       const params = new URLSearchParams({ tenantId: id });
-      if (startDate) params.set("startDate", startDate);
-      if (endDate) params.set("endDate", endDate);
+      if (dateRange?.from) params.set("startDate", format(dateRange.from, "yyyy-MM-dd"));
+      if (dateRange?.to) params.set("endDate", format(dateRange.to, "yyyy-MM-dd"));
 
       const res = await fetch(`/api/court-packet?${params.toString()}`);
 
@@ -215,27 +217,15 @@ export default function CourtPacketPage() {
               Generated as a single PDF with table of contents and page numbers.
             </p>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="startDate">Start Date (optional)</Label>
-                <input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="endDate">End Date (optional)</Label>
-                <input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Date Range (optional)</Label>
+              <DateRangePicker
+                value={dateRange}
+                onChange={setDateRange}
+                placeholder="Filter by date range"
+                fromLabel="Start"
+                toLabel="End"
+              />
             </div>
 
             <div className="rounded-md border p-4">

@@ -117,3 +117,49 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, firstName, lastName, email, phone, unitId, occupantCount, moveInDate, moveOutDate, active } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Tenant ID is required" },
+        { status: 400 }
+      );
+    }
+
+    // Build update data - only include fields that are provided
+    const updateData: Record<string, unknown> = {};
+    if (firstName !== undefined) updateData.firstName = firstName;
+    if (lastName !== undefined) updateData.lastName = lastName;
+    if (email !== undefined) updateData.email = email || null;
+    if (phone !== undefined) updateData.phone = phone || null;
+    if (unitId !== undefined) updateData.unitId = unitId || null;
+    if (occupantCount !== undefined) updateData.occupantCount = Math.max(1, parseInt(occupantCount) || 1);
+    if (moveInDate !== undefined) updateData.moveInDate = moveInDate ? new Date(moveInDate) : null;
+    if (moveOutDate !== undefined) updateData.moveOutDate = moveOutDate ? new Date(moveOutDate) : null;
+    if (active !== undefined) updateData.active = active;
+
+    const tenant = await prisma.tenant.update({
+      where: { id },
+      data: updateData,
+      include: {
+        unit: {
+          include: {
+            property: { select: { id: true, address: true } },
+          },
+        },
+      },
+    });
+
+    return NextResponse.json(tenant);
+  } catch (error) {
+    console.error("Failed to update tenant:", error);
+    return NextResponse.json(
+      { error: "Failed to update tenant" },
+      { status: 500 }
+    );
+  }
+}
