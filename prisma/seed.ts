@@ -1,3 +1,7 @@
+import { config } from "dotenv";
+config({ path: ".env.local" });
+config();
+
 import { PrismaClient } from "../src/generated/prisma/client";
 
 const prisma = new PrismaClient();
@@ -84,6 +88,74 @@ async function main() {
       },
     },
   });
+
+  // Seed utility providers
+  const utilityProviders = [
+    {
+      name: "Durham Water",
+      type: "water",
+      description: "Water & sewer services",
+      website: "https://billpay.onlinebiller.com/ebpp/durhamub/Login/Index",
+      phone: "(919) 560-4381",
+    },
+    {
+      name: "Duke Energy",
+      type: "electric",
+      description: "Electric service",
+      website: "https://www.duke-energy.com/sign-in",
+      phone: "(800) 452-2777",
+    },
+    {
+      name: "Enbridge Gas",
+      type: "gas",
+      description: "Natural gas service",
+      website: "https://account.dominionenergync.com",
+      phone: "(800) 752-7504",
+    },
+    {
+      name: "Wake Electric",
+      type: "electric",
+      description: "Electric cooperative",
+      website: "https://wemc.smarthub.coop/Login.html",
+      phone: "(919) 863-6300",
+    },
+    {
+      name: "Graham Utilities",
+      type: "water",
+      description: "Water, sewer & refuse (City of Graham)",
+      website: "https://wipp.edmundsassoc.com/Wipp/?wippid=GRAM",
+      phone: "(336) 570-6700",
+    },
+    {
+      name: "Spectrum",
+      type: "internet",
+      description: "Internet service",
+      website: "https://www.spectrum.net",
+      phone: "(855) 757-7328",
+    },
+    {
+      name: "Xfinity",
+      type: "internet",
+      description: "Internet service (Comcast)",
+      website: "https://www.xfinity.com",
+      phone: "(800) 934-6489",
+    },
+  ];
+
+  for (const provider of utilityProviders) {
+    await prisma.utilityProvider.upsert({
+      where: { name: provider.name },
+      update: {
+        type: provider.type,
+        description: provider.description,
+        website: provider.website,
+        phone: provider.phone,
+      },
+      create: provider,
+    });
+  }
+
+  console.log(`Seeded ${utilityProviders.length} utility providers`);
 
   console.log("Seed completed successfully.");
 }

@@ -105,17 +105,20 @@ model Unit {
 // ─── Tenant ────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id         String   @id @default(cuid())
-  firstName  String
-  lastName   String
-  email      String?
-  phone      String?
-  facebookId String?
-  unitId     String?
-  active     Boolean  @default(true)
-  deletedAt  DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String    @id @default(cuid())
+  firstName     String
+  lastName      String
+  email         String?
+  phone         String?
+  facebookId    String?
+  unitId        String?
+  active        Boolean   @default(true)
+  occupantCount Int       @default(1)
+  moveInDate    DateTime?
+  moveOutDate   DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   unit                 Unit?                @relation(fields: [unitId], references: [id])
   leases               Lease[]
@@ -409,6 +412,23 @@ model Application {
   @@index([status])
 }
 
+// ─── Utility Provider ─────────────────────────────────────────────────────
+
+model UtilityProvider {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String   // electric, gas, water, internet, trash, sewer, other
+  description String?
+  website     String?
+  phone       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([active])
+}
+
 // ─── Utility Bill ─────────────────────────────────────────────────────────
 
 model UtilityBill {
@@ -421,6 +441,7 @@ model UtilityBill {
   billingEnd   DateTime
   period       String   // "YYYY-MM" for the billing period
   allocated    Boolean  @default(false)
+  note         String?  // Optional note explaining the bill (for manual entries)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -583,6 +604,164 @@ model WakeElectricParsedBill {
   parsedAt           DateTime            @default(now())
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Graham Utilities Parsed Bills ──────────────────────────────────────────
+
+enum GrahamUtilitiesDocType {
+  BILL
+  DELINQUENCY_NOTICE
+  UNKNOWN
+}
+
+model GrahamUtilitiesParsedBill {
+  id                 String                  @id @default(cuid())
+  accountNumber      String
+  serviceLocation    String
+  documentType       GrahamUtilitiesDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  disconnectDate     DateTime?
+  lastDayToPay       DateTime?
+  previousBalance    Float                   @default(0)
+  currentCharges     Float                   @default(0)
+  waterCharges       Float                   @default(0)
+  sewerCharges       Float                   @default(0)
+  stormwaterCharges  Float                   @default(0)
+  refuseCharges      Float                   @default(0)
+  recyclingCharges   Float                   @default(0)
+  previousReading    Int                     @default(0)
+  currentReading     Int                     @default(0)
+  usage              Int                     @default(0)
+  requiresAttention  Boolean                 @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?            @unique
+  parsedAt           DateTime                @default(now())
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── SMUD Parsed Bills ──────────────────────────────────────────────────────
+
+enum SmudDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model SmudParsedBill {
+  id                 String        @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       SmudDocType   @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  billingDays        Int           @default(0)
+  kwhUsed            Float         @default(0)
+  meterNumber        String?
+  electricCharges    Float         @default(0)
+  taxes              Float         @default(0)
+  previousBalance    Float         @default(0)
+  paymentsReceived   Float         @default(0)
+  requiresAttention  Boolean       @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?  @unique
+  parsedAt           DateTime      @default(now())
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Spectrum Parsed Bills ──────────────────────────────────────────────────
+
+enum SpectrumDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model SpectrumParsedBill {
+  id                 String           @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       SpectrumDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  internetCharges    Float            @default(0)
+  previousBalance    Float            @default(0)
+  paymentsReceived   Float            @default(0)
+  requiresAttention  Boolean          @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?     @unique
+  parsedAt           DateTime         @default(now())
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([accountNumber, billingPeriodEnd])
+  @@index([accountNumber])
+  @@index([matchedPropertyId])
+  @@index([requiresAttention])
+}
+
+// ─── Xfinity Parsed Bills ──────────────────────────────────────────────────
+
+enum XfinityDocType {
+  BILL
+  DISCONNECT_NOTICE
+  UNKNOWN
+}
+
+model XfinityParsedBill {
+  id                 String          @id @default(cuid())
+  accountNumber      String
+  serviceAddress     String
+  documentType       XfinityDocType  @default(BILL)
+  amountDue          Float
+  billDate           DateTime?
+  dueDate            DateTime?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
+  internetCharges    Float           @default(0)
+  taxesAndFees       Float           @default(0)
+  previousBalance    Float           @default(0)
+  paymentsReceived   Float           @default(0)
+  requiresAttention  Boolean         @default(false)
+  attentionReason    String?
+  pdfPath            String?
+  matchedPropertyId  String?
+  importedToUtilityBillId String?    @unique
+  parsedAt           DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   @@unique([accountNumber, billingPeriodEnd])
   @@index([accountNumber])
