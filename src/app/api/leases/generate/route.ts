@@ -7,11 +7,32 @@ import { parseLeaseClausesFromContent } from "@/lib/lease-parser";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { templateId, tenantId, unitId, startDate, endDate, rentAmount, customFields } = body;
+    const { templateId, tenantId, unitId, startDate, endDate, rentAmount, securityDeposit, lessorName, customFields } = body;
 
     if (!templateId || !tenantId || !unitId || !startDate) {
       return NextResponse.json(
         { error: "templateId, tenantId, unitId, and startDate are required" },
+        { status: 400 }
+      );
+    }
+
+    if (!rentAmount) {
+      return NextResponse.json(
+        { error: "Rent amount is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!securityDeposit) {
+      return NextResponse.json(
+        { error: "Security deposit is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!lessorName) {
+      return NextResponse.json(
+        { error: "Lessor name is required" },
         { status: 400 }
       );
     }
@@ -53,48 +74,68 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build replacement map
-    const effectiveRentAmount = rentAmount || unit.rentAmount || 0;
+    // Build replacement map - only the essential variables that change per lease
+    const parsedRentAmount = parseFloat(rentAmount);
+    const parsedSecurityDeposit = parseFloat(securityDeposit);
     const start = new Date(startDate);
     const end = endDate ? new Date(endDate) : null;
+    const fullAddress = `${unit.property.address}, ${unit.property.city}, ${unit.property.state} ${unit.property.zip}`;
+
+    // Map state abbreviations to full names
+    const stateNames: Record<string, string> = {
+      NC: "North Carolina",
+      CA: "California",
+      TX: "Texas",
+      FL: "Florida",
+      NY: "New York",
+      // Add more as needed
+    };
 
     const replacements: Record<string, string> = {
-      // Tenant fields
-      tenant_name: `${tenant.firstName} ${tenant.lastName}`,
-      tenant_first_name: tenant.firstName,
-      tenant_last_name: tenant.lastName,
-      tenant_email: tenant.email || "",
-      tenant_phone: tenant.phone || "",
+      // Lessor name
+      LESSOR_NAME: lessorName,
 
-      // Property/Unit fields
-      property_address: unit.property.address,
-      property_city: unit.property.city,
-      property_state: unit.property.state,
-      property_zip: unit.property.zip,
-      property_full_address: `${unit.property.address}, ${unit.property.city}, ${unit.property.state} ${unit.property.zip}`,
-      unit_name: unit.name,
-      jurisdiction: unit.property.jurisdiction,
+      // Property/Unit
+      PROPERTY_ADDRESS: fullAddress,
+      ROOM_NUMBER: unit.name,
 
-      // Lease terms
-      rent_amount: effectiveRentAmount.toFixed(2),
-      rent_amount_words: numberToWords(effectiveRentAmount),
-      start_date: formatDate(start),
-      end_date: end ? formatDate(end) : "Month-to-month",
-      lease_term: end ? calculateTerm(start, end) : "Month-to-month",
+      // Lease dates
+      LEASE_START_DATE: formatDate(start),
+      LEASE_END_DATE: end ? formatDate(end) : "Month-to-month",
 
-      // Dates
-      current_date: formatDate(new Date()),
-      current_year: new Date().getFullYear().toString(),
+      // Payment terms
+      MONTHLY_RENT: `$${parsedRentAmount.toFixed(2)} (${numberToWords(parsedRentAmount)})`,
+      SECURITY_DEPOSIT: `$${parsedSecurityDeposit.toFixed(2)} (${numberToWords(parsedSecurityDeposit)})`,
 
-      // Custom fields
+      // Governing law (varies by property location)
+      STATE_NAME: stateNames[unit.property.state] || unit.property.state,
+      COUNTY_NAME: unit.property.jurisdiction?.replace(" County", "") || "Durham",
+
+      // Custom fields can override any of the above
       ...(customFields || {}),
     };
 
     // Apply replacements to template content
     let content = template.content;
+
+    // Apply variable replacements
     for (const [key, value] of Object.entries(replacements)) {
       const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi");
       content = content.replace(regex, value);
+    }
+
+    // Check for any remaining unreplaced variables
+    const remainingVariables = content.match(/\{\{[^}]+\}\}/g);
+    if (remainingVariables && remainingVariables.length > 0) {
+      // Filter out any that might be intentional (like conditionals already processed)
+      const uniqueVars = [...new Set(remainingVariables)];
+      return NextResponse.json(
+        {
+          error: `Template has unset variables: ${uniqueVars.slice(0, 5).join(", ")}${uniqueVars.length > 5 ? "..." : ""}`,
+          missingVariables: uniqueVars
+        },
+        { status: 400 }
+      );
     }
 
     // Determine version
@@ -109,7 +150,7 @@ export async function POST(request: NextRequest) {
         unitId,
         templateId,
         content,
-        rentAmount: effectiveRentAmount,
+        rentAmount: parsedRentAmount,
         startDate: start,
         endDate: end,
         version: previousLeases + 1,
@@ -122,7 +163,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Parse and store lease clauses
-    const parsedClauses = parseLeaseClausesFromContent(content, effectiveRentAmount);
+    const parsedClauses = parseLeaseClausesFromContent(content, parsedRentAmount);
     if (parsedClauses.length > 0) {
       await prisma.leaseClause.createMany({
         data: parsedClauses.map((clause) => ({

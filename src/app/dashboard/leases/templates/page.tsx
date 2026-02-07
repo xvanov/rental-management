@@ -38,26 +38,27 @@ interface LeaseTemplate {
   _count: { leases: number };
 }
 
+// Template markers that will be automatically replaced when generating a lease
+// Note: The tenant's name, signature, and date are filled in by the tenant during e-signing
 const AVAILABLE_MARKERS = [
-  { key: "tenant_name", description: "Full tenant name" },
-  { key: "tenant_first_name", description: "Tenant first name" },
-  { key: "tenant_last_name", description: "Tenant last name" },
-  { key: "tenant_email", description: "Tenant email address" },
-  { key: "tenant_phone", description: "Tenant phone number" },
-  { key: "property_address", description: "Property street address" },
-  { key: "property_city", description: "Property city" },
-  { key: "property_state", description: "Property state" },
-  { key: "property_zip", description: "Property zip code" },
-  { key: "property_full_address", description: "Full property address" },
-  { key: "unit_name", description: "Unit/room name" },
-  { key: "jurisdiction", description: "Property jurisdiction" },
-  { key: "rent_amount", description: "Monthly rent amount" },
-  { key: "rent_amount_words", description: "Rent amount in words" },
-  { key: "start_date", description: "Lease start date" },
-  { key: "end_date", description: "Lease end date" },
-  { key: "lease_term", description: "Calculated lease term" },
-  { key: "current_date", description: "Date of generation" },
-  { key: "current_year", description: "Current year" },
+  // Lessor
+  { key: "LESSOR_NAME", description: "Lessor/landlord name" },
+
+  // Property
+  { key: "PROPERTY_ADDRESS", description: "Full property address (street, city, state, zip)" },
+  { key: "ROOM_NUMBER", description: "Room/unit number" },
+
+  // Lease terms
+  { key: "LEASE_START_DATE", description: "Lease start date" },
+  { key: "LEASE_END_DATE", description: "Lease end date" },
+
+  // Payment
+  { key: "MONTHLY_RENT", description: "Monthly rent with amount in words" },
+  { key: "SECURITY_DEPOSIT", description: "Security deposit with amount in words" },
+
+  // Governing law
+  { key: "STATE_NAME", description: "State name (for governing law section)" },
+  { key: "COUNTY_NAME", description: "County name (for venue section)" },
 ];
 
 export default function LeaseTemplatesPage() {
@@ -219,8 +220,8 @@ export default function LeaseTemplatesPage() {
                 {editingTemplate ? "Edit Template" : "Create Lease Template"}
               </DialogTitle>
               <DialogDescription>
-                Use {`{{marker_name}}`} syntax for dynamic fields that will be
-                replaced when generating a lease.
+                Use {`{{MARKER_NAME}}`} syntax for dynamic fields. The tenant&apos;s name,
+                signature, and date are filled by them during e-signing.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -285,7 +286,7 @@ export default function LeaseTemplatesPage() {
                   </div>
                 )}
                 <Textarea
-                  placeholder={"SUBLEASE AGREEMENT\n\nThis Sublease Agreement is entered into on {{current_date}} between:\n\nLandlord/Sublessor: [Your Name]\nTenant/Sublessee: {{tenant_name}}\n\nProperty: {{property_full_address}}\nUnit: {{unit_name}}\n\nMonthly Rent: ${{rent_amount}} ({{rent_amount_words}})\nLease Term: {{start_date}} to {{end_date}}\n\n..."}
+                  placeholder={"# Room Rental Agreement\n\nThis Agreement is between **{{LESSOR_NAME}}** (\"Lessor\") and _____ (\"Tenant\").\n\n**Premises:** {{PROPERTY_ADDRESS}}, Room {{ROOM_NUMBER}}\n**Lease Term:** {{LEASE_START_DATE}} to {{LEASE_END_DATE}}\n**Monthly Rent:** {{MONTHLY_RENT}}\n**Security Deposit:** {{SECURITY_DEPOSIT}}\n\n(Tenant fills in their name, signature, and date during e-signing)"}
                   className="min-h-[400px] font-mono text-sm"
                   value={formContent}
                   onChange={(e) => setFormContent(e.target.value)}

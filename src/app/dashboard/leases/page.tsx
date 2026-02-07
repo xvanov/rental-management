@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
 import {
   FileText,
   Plus,
   Search,
   FilePlus2,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +28,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -37,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 interface Lease {
   id: string;
@@ -60,6 +66,11 @@ interface Tenant {
   lastName: string;
   email: string | null;
   unitId: string | null;
+  unit?: {
+    id: string;
+    name: string;
+    property: { id: string; address: string };
+  } | null;
 }
 
 interface Unit {
@@ -90,9 +101,11 @@ export default function LeasesPage() {
   const [genTemplateId, setGenTemplateId] = useState("");
   const [genTenantId, setGenTenantId] = useState("");
   const [genUnitId, setGenUnitId] = useState("");
-  const [genStartDate, setGenStartDate] = useState("");
-  const [genEndDate, setGenEndDate] = useState("");
+  const [genDateRange, setGenDateRange] = useState<DateRange | undefined>();
   const [genRentAmount, setGenRentAmount] = useState("");
+  const [genSecurityDeposit, setGenSecurityDeposit] = useState("");
+  const [genLessorName, setGenLessorName] = useState("");
+  const [genError, setGenError] = useState<string | null>(null);
 
   const fetchLeases = useCallback(async () => {
     try {
@@ -146,9 +159,63 @@ export default function LeasesPage() {
     fetchUnits();
   }, [fetchLeases, fetchFormData, fetchUnits]);
 
+  // Get selected tenant details for display
+  const selectedTenant = useMemo(() => {
+    if (!genTenantId) return null;
+    return tenants.find(t => t.id === genTenantId) || null;
+  }, [genTenantId, tenants]);
+
+  // Group and sort tenants by property address, then alphabetically by name
+  const tenantsGroupedByProperty = useMemo(() => {
+    const grouped = new Map<string, Tenant[]>();
+    const noProperty: Tenant[] = [];
+
+    for (const tenant of tenants) {
+      if (tenant.unit?.property?.address) {
+        const address = tenant.unit.property.address;
+        if (!grouped.has(address)) {
+          grouped.set(address, []);
+        }
+        grouped.get(address)!.push(tenant);
+      } else {
+        noProperty.push(tenant);
+      }
+    }
+
+    // Sort tenants within each group alphabetically
+    const sortTenants = (a: Tenant, b: Tenant) => {
+      const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
+      const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+      return nameA.localeCompare(nameB);
+    };
+
+    // Sort property addresses and build result
+    const sortedAddresses = Array.from(grouped.keys()).sort();
+    const result: { address: string; tenants: Tenant[] }[] = [];
+
+    for (const address of sortedAddresses) {
+      result.push({
+        address,
+        tenants: grouped.get(address)!.sort(sortTenants),
+      });
+    }
+
+    // Add tenants without property at the end
+    if (noProperty.length > 0) {
+      result.push({
+        address: "No Property Assigned",
+        tenants: noProperty.sort(sortTenants),
+      });
+    }
+
+    return result;
+  }, [tenants]);
+
   const handleGenerate = async () => {
-    if (!genTemplateId || !genTenantId || !genUnitId || !genStartDate) return;
+    if (!genTemplateId || !genTenantId || !genUnitId || !genDateRange?.from || !genRentAmount || !genSecurityDeposit || !genLessorName) return;
+
     setGenerating(true);
+    setGenError(null);
     try {
       const res = await fetch("/api/leases/generate", {
         method: "POST",
@@ -157,9 +224,11 @@ export default function LeasesPage() {
           templateId: genTemplateId,
           tenantId: genTenantId,
           unitId: genUnitId,
-          startDate: genStartDate,
-          endDate: genEndDate || undefined,
-          rentAmount: genRentAmount || undefined,
+          startDate: format(genDateRange.from, "yyyy-MM-dd"),
+          endDate: genDateRange.to ? format(genDateRange.to, "yyyy-MM-dd") : undefined,
+          rentAmount: genRentAmount,
+          securityDeposit: genSecurityDeposit,
+          lessorName: genLessorName,
         }),
       });
       if (res.ok) {
@@ -167,13 +236,19 @@ export default function LeasesPage() {
         setGenTemplateId("");
         setGenTenantId("");
         setGenUnitId("");
-        setGenStartDate("");
-        setGenEndDate("");
+        setGenDateRange(undefined);
         setGenRentAmount("");
+        setGenSecurityDeposit("");
+        setGenLessorName("");
+        setGenError(null);
         fetchLeases();
+      } else {
+        const data = await res.json();
+        setGenError(data.error || "Failed to generate lease");
       }
     } catch (error) {
       console.error("Failed to generate lease:", error);
+      setGenError("Failed to generate lease. Please try again.");
     } finally {
       setGenerating(false);
     }
@@ -237,7 +312,10 @@ export default function LeasesPage() {
               Templates
             </Link>
           </Button>
-          <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+          <Dialog open={generateDialogOpen} onOpenChange={(open) => {
+            setGenerateDialogOpen(open);
+            if (!open) setGenError(null);
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -248,7 +326,7 @@ export default function LeasesPage() {
               <DialogHeader>
                 <DialogTitle>Generate Lease from Template</DialogTitle>
                 <DialogDescription>
-                  Select a template, tenant, and unit to generate a new lease.
+                  Select a template, tenant, and unit to generate a new lease. The tenant will fill in their name and sign when they receive it.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
@@ -268,19 +346,36 @@ export default function LeasesPage() {
                   </Select>
                 </div>
                 <div>
-                  <Label>Tenant</Label>
+                  <Label>Send to Tenant</Label>
                   <Select value={genTenantId} onValueChange={setGenTenantId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select tenant" />
+                      <SelectValue placeholder="Select tenant to send lease to" />
                     </SelectTrigger>
                     <SelectContent>
-                      {tenants.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.firstName} {t.lastName}
-                        </SelectItem>
+                      {tenantsGroupedByProperty.map((group) => (
+                        <SelectGroup key={group.address}>
+                          <SelectLabel className="text-xs text-muted-foreground">
+                            {group.address}
+                          </SelectLabel>
+                          {group.tenants.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.firstName} {t.lastName}
+                              {t.unit && (
+                                <span className="text-muted-foreground ml-1">
+                                  ({t.unit.name})
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       ))}
                     </SelectContent>
                   </Select>
+                  {selectedTenant && !selectedTenant.email && (
+                    <p className="text-xs text-destructive mt-1">
+                      Warning: This tenant has no email address for e-signing
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label>Unit</Label>
@@ -297,34 +392,50 @@ export default function LeasesPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={genStartDate}
-                      onChange={(e) => setGenStartDate(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input
-                      type="date"
-                      value={genEndDate}
-                      onChange={(e) => setGenEndDate(e.target.value)}
-                    />
-                  </div>
+                <div>
+                  <Label>Lessor Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="text"
+                    placeholder="Name of the lessor/landlord"
+                    value={genLessorName}
+                    onChange={(e) => setGenLessorName(e.target.value)}
+                  />
                 </div>
                 <div>
-                  <Label>Rent Amount (optional override)</Label>
+                  <Label>Lease Term <span className="text-destructive">*</span></Label>
+                  <DateRangePicker
+                    value={genDateRange}
+                    onChange={setGenDateRange}
+                    placeholder="Select start and end dates"
+                    fromLabel="Start"
+                    toLabel="End"
+                  />
+                </div>
+                <div>
+                  <Label>Monthly Rent <span className="text-destructive">*</span></Label>
                   <Input
                     type="number"
                     step="0.01"
-                    placeholder="Uses unit default"
+                    placeholder="Monthly rent amount"
                     value={genRentAmount}
                     onChange={(e) => setGenRentAmount(e.target.value)}
                   />
                 </div>
+                <div>
+                  <Label>Security Deposit <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="Security deposit amount"
+                    value={genSecurityDeposit}
+                    onChange={(e) => setGenSecurityDeposit(e.target.value)}
+                  />
+                </div>
+                {genError && (
+                  <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                    {genError}
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button
@@ -333,7 +444,10 @@ export default function LeasesPage() {
                     !genTemplateId ||
                     !genTenantId ||
                     !genUnitId ||
-                    !genStartDate ||
+                    !genDateRange?.from ||
+                    !genRentAmount ||
+                    !genSecurityDeposit ||
+                    !genLessorName ||
                     generating
                   }
                 >
@@ -437,6 +551,7 @@ export default function LeasesPage() {
                 <TableHead>Start Date</TableHead>
                 <TableHead>Version</TableHead>
                 <TableHead>Template</TableHead>
+                <TableHead className="w-[80px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -478,6 +593,13 @@ export default function LeasesPage() {
                     ) : (
                       <span className="text-muted-foreground text-sm">—</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="icon" asChild>
+                      <Link href={`/dashboard/leases/${lease.id}`}>
+                        <Eye className="h-4 w-4" />
+                      </Link>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
