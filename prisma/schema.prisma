@@ -73,10 +73,12 @@ model Property {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  units        Unit[]
-  showings     Showing[]
-  events       Event[]
-  utilityBills UtilityBill[]
+  units           Unit[]
+  showings        Showing[]
+  events          Event[]
+  utilityBills    UtilityBill[]
+  tasks           Task[]
+  airFilterConfig AirFilterConfig?
 }
 
 enum UnitStatus {
@@ -171,14 +173,14 @@ model Lease {
   endDate   DateTime?
   signedAt  DateTime?
   signedDocumentUrl String?
-  xodoSignDocumentId String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  tenant   Tenant         @relation(fields: [tenantId], references: [id])
-  unit     Unit           @relation(fields: [unitId], references: [id])
-  template LeaseTemplate? @relation(fields: [templateId], references: [id])
-  clauses  LeaseClause[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  unit          Unit           @relation(fields: [unitId], references: [id])
+  template      LeaseTemplate? @relation(fields: [templateId], references: [id])
+  clauses       LeaseClause[]
+  signingTokens SigningToken[]
 
   @@index([tenantId])
   @@index([unitId])
@@ -198,6 +200,24 @@ model LeaseClause {
   @@index([leaseId])
 }
 
+model SigningToken {
+  id          String    @id @default(cuid())
+  token       String    @unique @default(cuid())
+  leaseId     String
+  signerEmail String
+  signerName  String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  lease Lease @relation(fields: [leaseId], references: [id])
+
+  @@index([token])
+  @@index([leaseId])
+}
+
 // ─── Event (Immutable) ─────────────────────────────────────────────────────
 
 enum EventType {
@@ -212,6 +232,7 @@ enum EventType {
   APPLICATION
   SHOWING
   CLEANING
+  MAINTENANCE
 }
 
 model Event {
@@ -798,4 +819,88 @@ model CleaningAssignment {
   @@index([tenantId])
   @@index([unitId])
   @@index([weekOf])
+}
+
+// ─── Task ─────────────────────────────────────────────────────────────────
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  DISMISSED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskSource {
+  MANUAL
+  AIR_FILTER
+  MAINTENANCE
+  MESSAGE
+  SYSTEM
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus   @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  source      TaskSource   @default(MANUAL)
+  sourceId    String?
+  propertyId  String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  property Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+  @@index([status])
+  @@index([source])
+  @@index([dueDate])
+}
+
+// ─── Air Filter Config ────────────────────────────────────────────────────
+
+enum AirFilterCadence {
+  MONTHS_3
+  MONTHS_4
+  MONTHS_6
+  MONTHS_12
+}
+
+model AirFilterConfig {
+  id              String           @id @default(cuid())
+  propertyId      String           @unique
+  cadence         AirFilterCadence @default(MONTHS_3)
+  lastChangedDate DateTime?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  property Property    @relation(fields: [propertyId], references: [id])
+  filters  AirFilter[]
+}
+
+// ─── Air Filter ───────────────────────────────────────────────────────────
+
+model AirFilter {
+  id              String    @id @default(cuid())
+  configId        String
+  label           String?
+  dimensions      String
+  lastChangedDate DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  config AirFilterConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
