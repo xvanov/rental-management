@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
-import { isXodoSignConfigured, sendPdfForSignature } from "@/lib/integrations/xodo-sign";
-import puppeteer from "puppeteer";
-import fs from "fs";
-import path from "path";
+import { sendEmail } from "@/lib/integrations/sendgrid";
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,7 +20,6 @@ export async function POST(request: NextRequest) {
       include: {
         tenant: true,
         unit: { include: { property: true } },
-        template: true,
       },
     });
 
@@ -34,9 +30,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (lease.status !== "DRAFT") {
+    if (lease.status === "ACTIVE" || lease.status === "EXPIRED" || lease.status === "TERMINATED") {
       return NextResponse.json(
-        { error: "Only DRAFT leases can be sent for signature" },
+        { error: `Cannot send a ${lease.status} lease for signature` },
         { status: 400 }
       );
     }
@@ -48,66 +44,51 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!isXodoSignConfigured()) {
-      // When Xodo Sign is not configured, just transition the status
-      await prisma.lease.update({
-        where: { id: leaseId },
-        data: { status: "PENDING_SIGNATURE" },
-      });
+    // Set lease status to PENDING_SIGNATURE
+    await prisma.lease.update({
+      where: { id: leaseId },
+      data: { status: "PENDING_SIGNATURE" },
+    });
 
-      await createEvent({
-        type: "LEASE",
-        payload: {
-          leaseId: lease.id,
-          action: "CREATED",
-          version: lease.version,
-        },
+    // Create signing token with 30-day expiry
+    const signingToken = await prisma.signingToken.create({
+      data: {
+        leaseId,
+        signerEmail: lease.tenant.email,
+        signerName: `${lease.tenant.firstName} ${lease.tenant.lastName}`,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+    const signingUrl = `${appUrl}/sign/${signingToken.token}`;
+
+    // Send email with signing link
+    let emailSent = false;
+    let emailError: string | null = null;
+    try {
+      await sendEmail({
+        to: lease.tenant.email,
+        subject: `Lease Agreement Ready for Signature - ${lease.unit.name} at ${lease.unit.property.address}`,
+        text: `Hi ${lease.tenant.firstName},\n\nYour lease agreement for ${lease.unit.name} at ${lease.unit.property.address} is ready for signature.\n\nPlease review and sign your lease at: ${signingUrl}\n\nThis link will expire in 30 days.`,
+        html: `
+          <p>Hi ${lease.tenant.firstName},</p>
+          <p>Your lease agreement for <strong>${lease.unit.name}</strong> at <strong>${lease.unit.property.address}</strong> is ready for signature.</p>
+          <p><a href="${signingUrl}" style="display: inline-block; padding: 12px 24px; background-color: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Review &amp; Sign Lease</a></p>
+          <p style="color: #666; font-size: 14px;">Or copy this link: ${signingUrl}</p>
+          <p style="color: #666; font-size: 14px;">This link will expire in 30 days.</p>
+        `,
         tenantId: lease.tenantId,
         propertyId: lease.unit.propertyId,
       });
-
-      return NextResponse.json({
-        success: true,
-        message: "Lease marked as pending signature (Xodo Sign not configured)",
-      });
+      emailSent = true;
+    } catch (emailErr) {
+      const msg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+      console.error("Failed to send signing email:", msg);
+      emailError = msg;
     }
 
-    // Generate PDF for signing
-    const pdfBuffer = await generateLeasePdf(lease);
-
-    // Send for signature via Xodo Sign
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
-    const webhookUrl = `${appUrl}/api/webhooks/xodo-sign`;
-
-    const result = await sendPdfForSignature({
-      pdfBuffer,
-      fileName: `lease-${lease.tenant.lastName}-${lease.unit.name}.pdf`,
-      signerEmail: lease.tenant.email,
-      signerName: `${lease.tenant.firstName} ${lease.tenant.lastName}`,
-      webhookUrl,
-      message: `Please review and sign the lease agreement for ${lease.unit.name} at ${lease.unit.property.address}. Fill in your name where indicated, add your signature, and date.`,
-      // Signature field positions (approximate, in points from bottom-left)
-      // These are placed at the end of the document in the tenant signature section
-      // Note: SignNow uses coordinates from the top-left, we'll adjust accordingly
-      signatureFields: {
-        // Tenant name field - "Print Name: _____"
-        tenantNameField: { x: 140, y: 680, page: 0 },
-        // Tenant signature field - signature line
-        tenantSignatureField: { x: 72, y: 720, page: 0 },
-        // Tenant date field
-        tenantDateField: { x: 380, y: 720, page: 0 },
-      },
-    });
-
-    // Update lease with Xodo Sign document ID
-    await prisma.lease.update({
-      where: { id: leaseId },
-      data: {
-        status: "PENDING_SIGNATURE",
-        xodoSignDocumentId: result.documentId,
-      },
-    });
-
+    // Log event
     await createEvent({
       type: "LEASE",
       payload: {
@@ -121,11 +102,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      documentId: result.documentId,
-      signingUrl: result.signingUrl,
-      message: result.signingUrl
-        ? "Lease ready for signature - use the signing link"
-        : "Lease sent for signature via Xodo Sign",
+      signingUrl,
+      emailSent,
+      emailError,
+      message: emailSent
+        ? "Lease sent for signature"
+        : "Signing link created but email failed to send — share the link manually",
     });
   } catch (error) {
     console.error("Failed to send lease for signature:", error);
@@ -134,404 +116,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-interface LeaseForPdf {
-  id: string;
-  content: string;
-  rentAmount: number | null;
-  version: number;
-  startDate: Date;
-  endDate: Date | null;
-  tenant: {
-    firstName: string;
-    lastName: string;
-    email: string | null;
-  };
-  unit: {
-    name: string;
-    property: {
-      address: string;
-      city: string;
-      state: string;
-      zip: string;
-    };
-  };
-  template: { name: string } | null;
-}
-
-/**
- * Generate a PDF buffer from the lease content for e-signature.
- */
-async function generateLeasePdf(lease: LeaseForPdf): Promise<Buffer> {
-  // Load lessor signature image as base64
-  const signaturePath = path.join(process.cwd(), "assets", "signatures", "lessor-signature.png");
-  let signatureBase64 = "";
-  try {
-    const signatureBuffer = fs.readFileSync(signaturePath);
-    signatureBase64 = signatureBuffer.toString("base64");
-  } catch (err) {
-    console.warn("Could not load lessor signature:", err);
-  }
-
-  const currentDate = new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  // Convert lease content to HTML with signature section
-  const htmlContent = generateLeaseHtml(lease.content, signatureBase64, currentDate);
-
-  // Generate PDF using Puppeteer
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  const page = await browser.newPage();
-  await page.setContent(htmlContent, { waitUntil: "networkidle0" });
-
-  const pdfBuffer = await page.pdf({
-    format: "Letter",
-    margin: {
-      top: "0.75in",
-      bottom: "1in",
-      left: "0.75in",
-      right: "0.75in",
-    },
-    printBackground: true,
-    displayHeaderFooter: true,
-    headerTemplate: '<div></div>',
-    footerTemplate: `
-      <div style="width: 100%; font-size: 9pt; font-family: 'Times New Roman', Times, serif; text-align: center; color: #666;">
-        Page <span class="pageNumber"></span> of <span class="totalPages"></span>
-      </div>
-    `,
-  });
-
-  await browser.close();
-
-  return Buffer.from(pdfBuffer);
-}
-
-function generateLeaseHtml(content: string, signatureBase64: string, currentDate: string): string {
-  const contentHtml = convertContentToHtml(content, signatureBase64, currentDate);
-
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    @page {
-      size: Letter;
-      margin: 0.75in;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      font-size: 11pt;
-      line-height: 1.4;
-      color: #000;
-      margin: 0;
-      padding: 0;
-    }
-
-    .content {
-      font-family: 'Times New Roman', Times, serif;
-    }
-
-    .content h1 {
-      font-size: 14pt;
-      font-weight: bold;
-      margin: 12pt 0 6pt 0;
-      text-align: center;
-    }
-
-    .content h2 {
-      font-size: 12pt;
-      font-weight: bold;
-      margin: 10pt 0 4pt 0;
-      border-bottom: 1px solid #ccc;
-      padding-bottom: 2pt;
-    }
-
-    .content h3 {
-      font-size: 11pt;
-      font-weight: bold;
-      margin: 8pt 0 3pt 0;
-    }
-
-    .content p {
-      margin: 0 0 4pt 0;
-      text-align: justify;
-    }
-
-    .content ul, .content ol {
-      margin: 0 0 4pt 0;
-      padding-left: 20pt;
-    }
-
-    .content li {
-      margin-bottom: 0;
-      padding-bottom: 0;
-    }
-
-    .content hr {
-      border: none;
-      border-top: 1px solid #ccc;
-      margin: 10pt 0;
-    }
-
-    .content strong, .content b {
-      font-weight: bold;
-    }
-
-    .signature-section {
-      margin-top: 24pt;
-      page-break-inside: avoid;
-    }
-
-    .signature-block {
-      margin-bottom: 36pt;
-    }
-
-    .signature-block .party-label {
-      font-weight: bold;
-      margin-bottom: 8pt;
-    }
-
-    .signature-block .signature-line {
-      display: flex;
-      align-items: flex-end;
-      gap: 24pt;
-      margin-top: 8pt;
-    }
-
-    .signature-block .signature-field {
-      flex: 1;
-    }
-
-    .signature-block .signature-field .line {
-      border-bottom: 1px solid #000;
-      min-height: 40pt;
-      position: relative;
-    }
-
-    .signature-block .signature-field .line img {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      max-height: 50pt;
-      max-width: 150pt;
-    }
-
-    .signature-block .signature-field .label {
-      font-size: 9pt;
-      margin-top: 2pt;
-    }
-
-    .signature-block .date-field {
-      width: 150pt;
-    }
-
-    .signature-block .date-field .line {
-      border-bottom: 1px solid #000;
-      min-height: 20pt;
-      padding-bottom: 2pt;
-    }
-
-    .signature-block .date-field .label {
-      font-size: 9pt;
-      margin-top: 2pt;
-    }
-
-    .signature-block .printed-name {
-      font-size: 10pt;
-      margin-top: 4pt;
-    }
-
-    /* E-signature field placeholders */
-    .esign-field {
-      background-color: #ffffcc;
-      border: 1px dashed #999;
-      display: inline-block;
-      min-width: 150pt;
-      min-height: 20pt;
-      padding: 2pt 4pt;
-      font-style: italic;
-      color: #666;
-    }
-
-    .esign-signature {
-      min-height: 40pt;
-      min-width: 200pt;
-    }
-  </style>
-</head>
-<body>
-  <div class="content">
-    ${contentHtml}
-  </div>
-</body>
-</html>
-  `;
-}
-
-function convertContentToHtml(content: string, signatureBase64: string, currentDate: string): string {
-  // Extract lessor name from the content
-  const lessorNameMatch = content.match(/\*\*Lessor:\*\*\s*([^\n]+)/);
-  const lessorName = lessorNameMatch ? lessorNameMatch[1].trim() : "";
-
-  // Split content into main body and addenda
-  // Look for "# Addendum" which starts the addenda section
-  const addendaMatch = content.match(/\n(# Addendum[\s\S]*)$/);
-  let mainBody = content;
-  let addendaContent = "";
-
-  if (addendaMatch) {
-    mainBody = content.substring(0, content.indexOf(addendaMatch[0]));
-    addendaContent = addendaMatch[1];
-  }
-
-  // Check if there's a signature section in the main body and handle it specially
-  const signatureSectionRegex = /## 10\) Signatures[\s\S]*$/;
-  const hasSignatureSection = signatureSectionRegex.test(mainBody);
-
-  let signatureHtml = "";
-
-  if (hasSignatureSection) {
-    // Remove the signature section from main body
-    mainBody = mainBody.replace(signatureSectionRegex, "");
-
-    // Generate custom signature section HTML for e-signature
-    // The tenant fields are left as placeholders that Xodo Sign will overlay
-    signatureHtml = `
-      <div class="signature-section">
-        <h2>10) Signatures</h2>
-        <p>By signing below, the parties acknowledge that they have read this Agreement in its entirety, understand all terms and conditions, and agree to be bound by them.</p>
-
-        <div class="signature-block">
-          <div class="party-label">Lessor: ${lessorName}</div>
-          <div class="signature-line">
-            <div class="signature-field">
-              <div class="line">
-                ${signatureBase64 ? `<img src="data:image/png;base64,${signatureBase64}" alt="Lessor Signature" />` : ""}
-              </div>
-              <div class="label">Signature</div>
-            </div>
-            <div class="date-field">
-              <div class="line">${currentDate}</div>
-              <div class="label">Date</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="signature-block">
-          <div class="party-label">Tenant:</div>
-          <div class="printed-name">Print Name: <span class="esign-field">[Fill in your full legal name]</span></div>
-          <div class="signature-line">
-            <div class="signature-field">
-              <div class="line">
-                <span class="esign-field esign-signature">[Sign here]</span>
-              </div>
-              <div class="label">Signature</div>
-            </div>
-            <div class="date-field">
-              <div class="line">
-                <span class="esign-field">[Date]</span>
-              </div>
-              <div class="label">Date</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <hr>
-    `;
-  }
-
-  // Helper function to convert markdown to HTML
-  const convertMarkdownToHtml = (markdown: string): string => {
-    let html = markdown;
-
-    // Escape HTML entities first
-    html = html
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-
-    // Convert markdown headers
-    html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-
-    // Convert horizontal rules
-    html = html.replace(/^---+$/gm, "<hr>");
-
-    // Convert bold
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-
-    // Convert lists (basic)
-    html = html.replace(/^- (.+)$/gm, "<li>$1</li>");
-
-    // Wrap consecutive li elements in ul
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-
-    // Convert line breaks to paragraphs
-    const lines = html.split("\n");
-    let result = "";
-    let inParagraph = false;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        if (inParagraph) {
-          result += "</p>\n";
-          inParagraph = false;
-        }
-        continue;
-      }
-
-      if (
-        trimmed.startsWith("<h") ||
-        trimmed.startsWith("<hr") ||
-        trimmed.startsWith("<ul") ||
-        trimmed.startsWith("</ul") ||
-        trimmed.startsWith("<li")
-      ) {
-        if (inParagraph) {
-          result += "</p>\n";
-          inParagraph = false;
-        }
-        result += line + "\n";
-        continue;
-      }
-
-      if (!inParagraph) {
-        result += "<p>";
-        inParagraph = true;
-      } else {
-        result += " ";
-      }
-      result += trimmed;
-    }
-
-    if (inParagraph) {
-      result += "</p>";
-    }
-
-    return result;
-  };
-
-  // Convert main body and addenda separately
-  const mainBodyHtml = convertMarkdownToHtml(mainBody);
-  const addendaHtml = addendaContent ? convertMarkdownToHtml(addendaContent) : "";
-
-  // Combine: main body + signature section + addenda
-  return mainBodyHtml + signatureHtml + addendaHtml;
 }

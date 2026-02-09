@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, status, content, rentAmount, startDate, endDate, signedAt, signedDocumentUrl, xodoSignDocumentId } = body;
+    const { id, status, content, rentAmount, startDate, endDate, signedAt, signedDocumentUrl } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -151,7 +151,7 @@ export async function PATCH(request: NextRequest) {
     if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
     if (signedAt !== undefined) updateData.signedAt = signedAt ? new Date(signedAt) : null;
     if (signedDocumentUrl !== undefined) updateData.signedDocumentUrl = signedDocumentUrl;
-    if (xodoSignDocumentId !== undefined) updateData.xodoSignDocumentId = xodoSignDocumentId;
+
 
     // Handle status transitions
     if (status) {
