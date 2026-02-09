@@ -46,7 +46,6 @@ interface Lease {
   endDate: string | null;
   signedAt: string | null;
   signedDocumentUrl: string | null;
-  xodoSignDocumentId: string | null;
   createdAt: string;
   updatedAt: string;
   tenant: {
@@ -83,6 +82,8 @@ export default function LeaseDetailPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [signingUrl, setSigningUrl] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
@@ -127,8 +128,10 @@ export default function LeaseDetailPage() {
         const data = await res.json();
         setSendSuccess(true);
         setSigningUrl(data.signingUrl || null);
+        setEmailSent(data.emailSent ?? false);
+        setEmailError(data.emailError ?? null);
         setConfirmDialogOpen(false);
-        fetchLease(); // Refresh to get updated status
+        fetchLease();
       } else {
         const data = await res.json();
         setSendError(data.error || "Failed to send for signature");
@@ -272,15 +275,26 @@ export default function LeaseDetailPage() {
             )}
             Download PDF
           </Button>
-          {lease.status === "DRAFT" && (
+          {(lease.status === "DRAFT" || lease.status === "PENDING_SIGNATURE") && (
             <Button onClick={() => setConfirmDialogOpen(true)}>
               <Send className="mr-2 h-4 w-4" />
-              Send for Signature
+              {lease.status === "PENDING_SIGNATURE" ? "Resend for Signature" : "Send for Signature"}
+            </Button>
+          )}
+          {signingUrl && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(signingUrl);
+              }}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Copy Signing Link
             </Button>
           )}
           {lease.signedDocumentUrl && (
             <Button variant="outline" asChild>
-              <a href={lease.signedDocumentUrl} target="_blank" rel="noopener noreferrer">
+              <a href={`/api/signed-documents/${lease.id}`} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
                 View Signed Document
               </a>
@@ -294,7 +308,7 @@ export default function LeaseDetailPage() {
         <div className="rounded-md bg-green-50 border border-green-200 p-4 text-green-800">
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle2 className="h-5 w-5" />
-            <span className="font-medium">Lease ready for signature!</span>
+            <span className="font-medium">Lease sent for signature!</span>
           </div>
           {signingUrl && (
             <div className="mt-3 p-3 bg-white rounded border border-green-300">
@@ -321,8 +335,15 @@ export default function LeaseDetailPage() {
               </div>
             </div>
           )}
-          {!signingUrl && lease.tenant.email && (
-            <p className="text-sm">An email notification was also sent to {lease.tenant.email}.</p>
+          {emailSent && lease.tenant.email && (
+            <p className="text-sm mt-2">An email was also sent to {lease.tenant.email}.</p>
+          )}
+          {!emailSent && emailError && (
+            <div className="mt-3 rounded-md bg-yellow-50 border border-yellow-300 p-3 text-yellow-800">
+              <p className="text-sm font-medium">Email could not be sent</p>
+              <p className="text-sm">{emailError}</p>
+              <p className="text-sm mt-1">Share the signing link above with the tenant manually.</p>
+            </div>
           )}
         </div>
       )}
@@ -389,7 +410,7 @@ export default function LeaseDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="font-medium text-xl">
-              {lease.rentAmount ? `$${lease.rentAmount.toFixed(2)}` : "—"}
+              {lease.rentAmount ? `$${lease.rentAmount.toFixed(2)}` : "\u2014"}
             </p>
             {lease.signedAt && (
               <p className="text-sm text-muted-foreground">
@@ -445,10 +466,12 @@ export default function LeaseDetailPage() {
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Send Lease for Signature</DialogTitle>
+            <DialogTitle>
+              {lease.status === "PENDING_SIGNATURE" ? "Resend Lease for Signature" : "Send Lease for Signature"}
+            </DialogTitle>
             <DialogDescription>
-              This will send the lease to {lease.tenant.firstName} {lease.tenant.lastName} for
-              electronic signature.
+              This will {lease.status === "PENDING_SIGNATURE" ? "resend" : "send"} the lease to{" "}
+              {lease.tenant.firstName} {lease.tenant.lastName} for electronic signature.
             </DialogDescription>
           </DialogHeader>
 
@@ -491,7 +514,7 @@ export default function LeaseDetailPage() {
               ) : (
                 <>
                   <Send className="mr-2 h-4 w-4" />
-                  Send for Signature
+                  {lease.status === "PENDING_SIGNATURE" ? "Resend" : "Send for Signature"}
                 </>
               )}
             </Button>
