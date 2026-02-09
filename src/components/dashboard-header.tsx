@@ -22,6 +22,8 @@ const pageTitles: Record<string, string> = {
   "/dashboard/calendar": "Calendar",
   "/dashboard/settings": "Settings",
   "/dashboard/jobs": "Job Queue",
+  "/dashboard/tasks": "Tasks",
+  "/dashboard/maintenance": "Maintenance",
 };
 
 export function DashboardHeader() {

@@ -20,6 +20,8 @@ import {
   Sparkles,
   Home,
   DoorOpen,
+  Wrench,
+  CheckSquare,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -55,8 +57,10 @@ const navItems = [
   { title: "Payments", href: "/dashboard/payments", icon: CreditCard },
   { title: "Utilities", href: "/dashboard/utilities", icon: Zap },
   { title: "Cleaning", href: "/dashboard/cleaning", icon: Sparkles },
+  { title: "Maintenance", href: "/dashboard/maintenance", icon: Wrench },
   { title: "Enforcement", href: "/dashboard/enforcement", icon: ShieldAlert },
   { title: "Calendar", href: "/dashboard/calendar", icon: Calendar },
+  { title: "Tasks", href: "/dashboard/tasks", icon: CheckSquare },
   { title: "Move-In", href: "/dashboard/move-in", icon: Home },
   { title: "Move-Out", href: "/dashboard/move-out", icon: DoorOpen },
   { title: "Settings", href: "/dashboard/settings", icon: Settings },

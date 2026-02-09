@@ -17,6 +17,11 @@ import {
   Home,
   ArrowRight,
   Clock,
+  CheckSquare,
+  Check,
+  AlertCircle,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +76,16 @@ interface DashboardData {
     occupiedUnits: number;
     occupancyRate: number;
     tenantCount: number;
+  }>;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    source: string;
+    dueDate: string | null;
+    property: string | null;
+    propertyId: string | null;
   }>;
 }
 
@@ -276,6 +291,93 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* To-Do List */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CheckSquare className="h-5 w-5" />
+            To-Do
+          </CardTitle>
+          <Link href="/dashboard/tasks">
+            <Button variant="ghost" size="sm" className="gap-1">
+              View All
+              <ArrowRight className="h-3 w-3" />
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {data?.tasks && data.tasks.length > 0 ? (
+            <div className="space-y-2">
+              {data.tasks.slice(0, 5).map((task) => (
+                <div
+                  key={task.id}
+                  className="flex items-center gap-3 rounded-lg border p-3"
+                >
+                  <TaskPriorityDot priority={task.priority} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">
+                        {task.title}
+                      </span>
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        {task.source === "AIR_FILTER"
+                          ? "Air Filter"
+                          : task.source.charAt(0) +
+                            task.source.slice(1).toLowerCase()}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {task.property && (
+                        <span className="text-xs text-muted-foreground truncate">
+                          {task.property}
+                        </span>
+                      )}
+                      {task.dueDate && (
+                        <span className="text-xs text-muted-foreground">
+                          Due{" "}
+                          {new Date(task.dueDate).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50 shrink-0"
+                    onClick={async () => {
+                      await fetch("/api/tasks", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          id: task.id,
+                          status: "COMPLETED",
+                        }),
+                      });
+                      // Re-fetch dashboard
+                      const res = await fetch("/api/dashboard");
+                      if (res.ok) setData(await res.json());
+                    }}
+                    title="Complete"
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <CheckSquare className="h-8 w-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">
+                No pending tasks. You&apos;re all caught up!
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Enforcement Deadlines + Upcoming Showings */}
       <div className="grid gap-6 md:grid-cols-2">
         {/* Enforcement Deadlines */}
@@ -473,6 +575,8 @@ function ActionItemIcon({ type }: { type: string }) {
       return <CalendarClock className="h-4 w-4 text-green-500" />;
     case "payments":
       return <DollarSign className="h-4 w-4 text-red-500" />;
+    case "tasks":
+      return <CheckSquare className="h-4 w-4 text-indigo-500" />;
     default:
       return <Users className="h-4 w-4 text-muted-foreground" />;
   }
@@ -490,6 +594,21 @@ function EventTypeIcon({ type }: { type: string }) {
       return <Building2 className="h-4 w-4 text-muted-foreground mt-0.5" />;
     default:
       return <Clock className="h-4 w-4 text-muted-foreground mt-0.5" />;
+  }
+}
+
+function TaskPriorityDot({ priority }: { priority: string }) {
+  switch (priority) {
+    case "URGENT":
+      return <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />;
+    case "HIGH":
+      return <ArrowUp className="h-4 w-4 text-orange-500 shrink-0" />;
+    case "MEDIUM":
+      return <ArrowRight className="h-4 w-4 text-blue-500 shrink-0" />;
+    case "LOW":
+      return <ArrowDown className="h-4 w-4 text-gray-400 shrink-0" />;
+    default:
+      return null;
   }
 }
 

@@ -16,6 +16,8 @@ export async function GET() {
       recentEvents,
       properties,
       ledgerBalance,
+      pendingTaskCount,
+      pendingTasks,
     ] = await Promise.all([
       // Total properties
       prisma.property.count(),
@@ -92,6 +94,21 @@ export async function GET() {
       prisma.ledgerEntry.groupBy({
         by: ["tenantId"],
         _max: { createdAt: true },
+      }),
+
+      // Pending task count
+      prisma.task.count({
+        where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+      }),
+
+      // Top 10 pending tasks
+      prisma.task.findMany({
+        where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+        include: {
+          property: { select: { id: true, address: true } },
+        },
+        orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+        take: 10,
       }),
     ]);
 
@@ -208,6 +225,16 @@ export async function GET() {
       });
     }
 
+    if (pendingTaskCount > 0) {
+      actionItems.push({
+        type: "tasks",
+        label: "Pending tasks",
+        count: pendingTaskCount,
+        href: "/dashboard/tasks",
+        priority: "medium",
+      });
+    }
+
     return NextResponse.json({
       metrics: {
         propertyCount,
@@ -247,6 +274,16 @@ export async function GET() {
         payload: e.payload,
       })),
       propertySummaries,
+      tasks: pendingTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        source: t.source,
+        dueDate: t.dueDate,
+        property: t.property?.address ?? null,
+        propertyId: t.propertyId,
+      })),
     });
   } catch (error) {
     console.error("Failed to fetch dashboard data:", error);
