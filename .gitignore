@@ -32,6 +32,7 @@ yarn-error.log*
 # env files
 .env*.local
 .env
+.env.production
 
 # vercel
 .vercel
@@ -55,6 +56,9 @@ src/generated/prisma
 
 # Claude Code
 .claude/
+
+# Runtime logs
+start.log
 
 # BMAD workflow files (installed via npm)
 _bmad/
