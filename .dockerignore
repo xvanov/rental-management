@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.gitignore
+*.md
+!README.md
+.env*
+!.env.production.example
+data/
+scripts/
+*.log
+start.log
+start.sh
+.vscode
+.idea
