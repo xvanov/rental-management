@@ -59,6 +59,9 @@ export interface LeaseEventPayload {
   leaseId: string;
   action: "CREATED" | "SIGNED" | "RENEWED" | "TERMINATED" | "EXPIRED";
   version?: number;
+  signerName?: string;
+  signerEmail?: string;
+  ipAddress?: string;
 }
 
 export interface ApplicationEventPayload {
@@ -81,6 +84,14 @@ export interface CleaningEventPayload {
   feeApplied?: number;
 }
 
+export interface MaintenanceEventPayload {
+  maintenanceType: "AIR_FILTER" | "GENERAL";
+  action: "FILTER_CHANGED" | "CONFIG_CREATED" | "CONFIG_REMOVED";
+  configId?: string;
+  filterCount?: number;
+  description?: string;
+}
+
 // ─── Discriminated Union ────────────────────────────────────────────────────
 
 export type EventPayload =
@@ -94,7 +105,8 @@ export type EventPayload =
   | { type: "LEASE"; data: LeaseEventPayload }
   | { type: "APPLICATION"; data: ApplicationEventPayload }
   | { type: "SHOWING"; data: ShowingEventPayload }
-  | { type: "CLEANING"; data: CleaningEventPayload };
+  | { type: "CLEANING"; data: CleaningEventPayload }
+  | { type: "MAINTENANCE"; data: MaintenanceEventPayload };
 
 // ─── Helper: Extract payload data type for a given event type ───────────────
 

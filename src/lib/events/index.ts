@@ -81,6 +81,17 @@ export async function logCleaningEvent(
   });
 }
 
+export async function logMaintenanceEvent(
+  payload: PayloadDataForType<"MAINTENANCE">,
+  opts?: { tenantId?: string; propertyId?: string }
+) {
+  return createEvent({
+    type: "MAINTENANCE",
+    payload,
+    ...opts,
+  });
+}
+
 // ─── Query Helpers ───────────────────────────────────────────────────────────
 
 /**
