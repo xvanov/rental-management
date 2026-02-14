@@ -98,6 +98,26 @@ export function AppSidebar() {
         .toUpperCase()
     : "U";
 
+  const [orgName, setOrgName] = useState("Rental Ops");
+
+  useEffect(() => {
+    fetch("/api/organizations")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.organization?.name) {
+          setOrgName(data.organization.name);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const orgInitials = orgName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -106,10 +126,10 @@ export function AppSidebar() {
             <SidebarMenuButton size="lg" asChild>
               <Link href="/dashboard">
                 <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg text-xs font-bold">
-                  RO
+                  {orgInitials}
                 </div>
                 <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold">Rental Ops</span>
+                  <span className="font-semibold">{orgName}</span>
                   <span className="text-xs text-muted-foreground">
                     Management
                   </span>

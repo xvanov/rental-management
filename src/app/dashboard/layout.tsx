@@ -13,5 +13,10 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Redirect to onboarding if user has no organization
+  if (!session.user.organizationId) {
+    redirect("/onboarding");
+  }
+
   return <DashboardShell>{children}</DashboardShell>;
 }

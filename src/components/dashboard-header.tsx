@@ -16,14 +16,20 @@ const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/dashboard/properties": "Properties",
   "/dashboard/tenants": "Tenants",
+  "/dashboard/applications": "Applications",
+  "/dashboard/leases": "Leases",
   "/dashboard/inbox": "Inbox",
   "/dashboard/payments": "Payments",
+  "/dashboard/utilities": "Utilities",
+  "/dashboard/cleaning": "Cleaning",
+  "/dashboard/maintenance": "Maintenance",
   "/dashboard/enforcement": "Enforcement",
   "/dashboard/calendar": "Calendar",
+  "/dashboard/tasks": "Tasks",
+  "/dashboard/move-in": "Move-In",
+  "/dashboard/move-out": "Move-Out",
   "/dashboard/settings": "Settings",
   "/dashboard/jobs": "Job Queue",
-  "/dashboard/tasks": "Tasks",
-  "/dashboard/maintenance": "Maintenance",
 };
 
 export function DashboardHeader() {
