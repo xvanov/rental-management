@@ -7,9 +7,17 @@ import { PrismaClient } from "../src/generated/prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  // Create or find a seed organization
+  let org = await prisma.organization.findFirst({ where: { name: "Seed Organization" } });
+  if (!org) {
+    org = await prisma.organization.create({ data: { name: "Seed Organization" } });
+    console.log(`Created organization: ${org.name}`);
+  }
+
   // Create a sample property
   const property = await prisma.property.create({
     data: {
+      organizationId: org.id,
       address: "123 Main Street",
       city: "Durham",
       state: "NC",
@@ -36,6 +44,7 @@ async function main() {
   // Create a second property
   const property2 = await prisma.property.create({
     data: {
+      organizationId: org.id,
       address: "456 Oak Avenue",
       city: "Durham",
       state: "NC",

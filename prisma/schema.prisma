@@ -11,15 +11,17 @@ datasource db {
 // ─── NextAuth ─────────────────────────────────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                   String                @id @default(cuid())
+  name                 String?
+  email                String?               @unique
+  emailVerified        DateTime?
+  image                String?
+  accounts             Account[]
+  sessions             Session[]
+  memberships          OrganizationMember[]
+  activeOrganizationId String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 }
 
 model Account {
@@ -61,24 +63,77 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// ─── Organization ─────────────────────────────────────────────────────────
+
+enum OrgRole {
+  ADMIN
+  MEMBER
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members        OrganizationMember[]
+  invites        OrganizationInvite[]
+  properties     Property[]
+  leaseTemplates LeaseTemplate[]
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrgRole  @default(MEMBER)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model OrganizationInvite {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           OrgRole   @default(MEMBER)
+  invitedBy      String
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([email])
+}
+
 // ─── Property & Unit ───────────────────────────────────────────────────────
 
 model Property {
-  id           String   @id @default(cuid())
-  address      String
-  city         String
-  state        String
-  zip          String
-  jurisdiction String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String
+  address        String
+  city           String
+  state          String
+  zip            String
+  jurisdiction   String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
+  organization    Organization     @relation(fields: [organizationId], references: [id])
   units           Unit[]
   showings        Showing[]
   events          Event[]
   utilityBills    UtilityBill[]
   tasks           Task[]
   airFilterConfig AirFilterConfig?
+
+  @@index([organizationId])
 }
 
 enum UnitStatus {
@@ -131,6 +186,7 @@ model Tenant {
   applications         Application[]
   cleaningAssignments  CleaningAssignment[]
   events               Event[]
+  documents            TenantDocument[]
 
   @@index([unitId])
   @@index([email])
@@ -138,18 +194,38 @@ model Tenant {
   @@index([facebookId])
 }
 
+// ─── Tenant Document ─────────────────────────────────────────────────────────
+
+model TenantDocument {
+  id         String   @id @default(cuid())
+  tenantId   String
+  category   String   // "ID", "PAYSTUB", "BANK_STATEMENT"
+  fileName   String
+  filePath   String   // relative: "data/tenant-documents/{tenantId}/{category}/{filename}"
+  mimeType   String?
+  uploadedAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
 // ─── Lease ─────────────────────────────────────────────────────────────────
 
 model LeaseTemplate {
-  id          String   @id @default(cuid())
-  name        String
-  content     String
-  description String?
-  jurisdiction String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String?
+  name           String
+  content        String
+  description    String?
+  jurisdiction   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  leases Lease[]
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  leases       Lease[]
+
+  @@index([organizationId])
 }
 
 enum LeaseStatus {
@@ -263,19 +339,36 @@ enum PaymentMethod {
   CHECK
 }
 
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum PaymentSource {
+  MANUAL
+  EMAIL_IMPORT
+  HISTORICAL_IMPORT
+}
+
 model Payment {
-  id        String        @id @default(cuid())
-  tenantId  String
-  amount    Float
-  method    PaymentMethod
-  date      DateTime
-  note      String?
-  createdAt DateTime      @default(now())
+  id         String        @id @default(cuid())
+  tenantId   String
+  amount     Float
+  method     PaymentMethod
+  date       DateTime
+  note       String?
+  externalId String?
+  status     PaymentStatus @default(CONFIRMED)
+  source     PaymentSource @default(MANUAL)
+  createdAt  DateTime      @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
+  @@unique([externalId, method])
   @@index([tenantId])
   @@index([date])
+  @@index([status])
 }
 
 enum LedgerEntryType {
@@ -286,6 +379,7 @@ enum LedgerEntryType {
   CREDIT
   PAYMENT
   DEDUCTION
+  OPENING_BALANCE
 }
 
 model LedgerEntry {

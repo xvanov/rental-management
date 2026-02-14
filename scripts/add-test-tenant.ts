@@ -25,9 +25,15 @@ async function main() {
   });
 
   if (!property) {
+    // Find or create default org for test scripts
+    let org = await prisma.organization.findFirst();
+    if (!org) {
+      org = await prisma.organization.create({ data: { name: "Test Organization" } });
+    }
     // Create the property with a single unit
     property = await prisma.property.create({
       data: {
+        organizationId: org.id,
         address: testAddress,
         city: testCity,
         state: testState,
