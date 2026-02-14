@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { name, propertyId, rentAmount } = body;
 
@@ -11,6 +15,14 @@ export async function POST(request: NextRequest) {
         { error: "Name and propertyId are required" },
         { status: 400 }
       );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json({ error: "Property not found" }, { status: 404 });
     }
 
     const unit = await prisma.unit.create({
@@ -39,6 +51,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, name, status, rentAmount } = body;
 
@@ -47,6 +62,14 @@ export async function PATCH(request: NextRequest) {
         { error: "Unit ID is required" },
         { status: 400 }
       );
+    }
+
+    // Verify unit belongs to org
+    const existing = await prisma.unit.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json({ error: "Unit not found" }, { status: 404 });
     }
 
     const unit = await prisma.unit.update({

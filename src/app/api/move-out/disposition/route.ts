@@ -9,11 +9,15 @@ import {
   getDepositReturnDeadline,
   generateDispositionNoticeContent,
 } from "@/lib/jobs/move-out-flow";
+import { getAuthContext } from "@/lib/auth-context";
 
 // ─── POST: Generate and send deposit disposition notice ──────────────────────
 
 export async function POST(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, deductions, moveOutDate } = body;
 
@@ -39,9 +43,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // Fetch tenant
+    // Fetch tenant, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: { include: { property: true } },
       },
@@ -197,11 +201,22 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
 
     if (!tenantId) {
       return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
+    }
+
+    // Verify tenant belongs to org
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
+    });
+    if (!tenant) {
+      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
 
     const notice = await prisma.notice.findFirst({

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { configId, dimensions, label } = body;
 
@@ -10,6 +14,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "configId and dimensions are required" },
         { status: 400 }
+      );
+    }
+
+    // Verify config belongs to org via config -> property chain
+    const config = await prisma.airFilterConfig.findFirst({
+      where: { id: configId, property: { organizationId: ctx.organizationId } },
+    });
+    if (!config) {
+      return NextResponse.json(
+        { error: "Config not found in your organization" },
+        { status: 404 }
       );
     }
 
@@ -33,6 +48,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, dimensions, label } = body;
 
@@ -40,6 +58,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: "Filter id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify filter belongs to org via filter -> config -> property chain
+    const existing = await prisma.airFilter.findFirst({
+      where: { id, config: { property: { organizationId: ctx.organizationId } } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Filter not found in your organization" },
+        { status: 404 }
       );
     }
 
@@ -64,6 +93,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -71,6 +103,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         { error: "Filter id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify filter belongs to org via filter -> config -> property chain
+    const existing = await prisma.airFilter.findFirst({
+      where: { id, config: { property: { organizationId: ctx.organizationId } } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Filter not found in your organization" },
+        { status: 404 }
       );
     }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logSystemEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * POST /api/ledger/generate
@@ -10,6 +11,9 @@ import { logSystemEvent } from "@/lib/events";
  */
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { period, tenantId, action } = body;
 
@@ -22,9 +26,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "rent") {
-      return await generateRentCharges(period);
+      return await generateRentCharges(ctx.organizationId, period);
     } else if (action === "late-fees") {
-      return await applyLateFees(period);
+      return await applyLateFees(ctx.organizationId, period);
     } else if (action === "prorate") {
       if (!tenantId) {
         return NextResponse.json(
@@ -32,7 +36,7 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      return await generateProration(tenantId, body.moveInDate);
+      return await generateProration(ctx.organizationId, tenantId, body.moveInDate);
     }
 
     return NextResponse.json(
@@ -48,12 +52,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function generateRentCharges(periodOverride?: string) {
+async function generateRentCharges(organizationId: string, periodOverride?: string) {
   const period = periodOverride || formatPeriod(new Date());
 
-  // Find all active leases with tenants
+  // Find all active leases with tenants, scoped to org
   const activeLeases = await prisma.lease.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      unit: { property: { organizationId } },
+    },
     include: {
       tenant: true,
       unit: { include: { property: true } },
@@ -135,12 +142,15 @@ async function generateRentCharges(periodOverride?: string) {
   });
 }
 
-async function applyLateFees(periodOverride?: string) {
+async function applyLateFees(organizationId: string, periodOverride?: string) {
   const period = periodOverride || formatPeriod(new Date());
 
-  // Find all active leases with their clauses
+  // Find all active leases with their clauses, scoped to org
   const activeLeases = await prisma.lease.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      unit: { property: { organizationId } },
+    },
     include: {
       tenant: true,
       clauses: true,
@@ -174,9 +184,13 @@ async function applyLateFees(periodOverride?: string) {
 
     const dueDay = (dueDateMeta?.dueDay as number) || 1;
     const graceDays = (graceMeta?.days as number) || 0;
-    const feeAmount = (metadata?.amount as number) || 0;
+    const rawFeeAmount = (metadata?.amount as number) || 0;
+    const feeType = (metadata?.type as string) || "fixed";
+    const resolvedFeeAmount = feeType === "percentage"
+      ? (lease.rentAmount || 0) * (rawFeeAmount / 100)
+      : rawFeeAmount;
 
-    if (feeAmount <= 0) continue;
+    if (resolvedFeeAmount <= 0) continue;
 
     // Calculate the deadline (due date + grace period)
     const [year, month] = period.split("-").map(Number);
@@ -262,13 +276,13 @@ async function applyLateFees(periodOverride?: string) {
     });
 
     const currentBalance = latestLedger?.balance ?? 0;
-    const newBalance = currentBalance + feeAmount;
+    const newBalance = currentBalance + resolvedFeeAmount;
 
     await prisma.ledgerEntry.create({
       data: {
         tenantId: lease.tenantId,
         type: "LATE_FEE",
-        amount: feeAmount,
+        amount: resolvedFeeAmount,
         description: `Late fee - ${formatPeriodLabel(period)}`,
         period,
         balance: newBalance,
@@ -278,7 +292,7 @@ async function applyLateFees(periodOverride?: string) {
     results.push({
       tenantId: lease.tenantId,
       tenantName: `${lease.tenant.firstName} ${lease.tenant.lastName}`,
-      feeAmount,
+      feeAmount: resolvedFeeAmount,
       status: "applied",
     });
   }
@@ -297,7 +311,7 @@ async function applyLateFees(periodOverride?: string) {
   });
 }
 
-async function generateProration(tenantId: string, moveInDate?: string) {
+async function generateProration(organizationId: string, tenantId: string, moveInDate?: string) {
   if (!moveInDate) {
     return NextResponse.json(
       { error: "moveInDate is required for proration" },
@@ -308,6 +322,7 @@ async function generateProration(tenantId: string, moveInDate?: string) {
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     include: {
+      unit: { include: { property: true } },
       leases: {
         where: { status: "ACTIVE" },
         take: 1,
@@ -315,7 +330,7 @@ async function generateProration(tenantId: string, moveInDate?: string) {
     },
   });
 
-  if (!tenant) {
+  if (!tenant || tenant.unit?.property?.organizationId !== organizationId) {
     return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
   }
 

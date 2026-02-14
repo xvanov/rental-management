@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 // ─── POST: Submit move-out inspection ────────────────────────────────────────
 
 export async function POST(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, notes, photos, deductions } = body;
 
@@ -13,9 +17,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
     }
 
-    // Validate tenant exists and has a terminated/active lease
+    // Validate tenant exists and has a terminated/active lease, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: { include: { property: true } },
         leases: { where: { status: { in: ["ACTIVE", "TERMINATED"] } }, orderBy: { createdAt: "desc" }, take: 1 },
@@ -132,11 +136,22 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
 
     if (!tenantId) {
       return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
+    }
+
+    // Verify tenant belongs to org
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
+    });
+    if (!tenant) {
+      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
 
     const inspectionEvent = await prisma.event.findFirst({

@@ -1,8 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET() {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
+    const orgId = ctx.organizationId;
+
+    // Reusable scope fragments
+    const propScope = { organizationId: orgId };
+    const unitScope = { property: propScope };
+    const tenantScope = { unit: unitScope };
+    const tenantDeepScope = { tenant: tenantScope };
+
     // ─── Key Metrics ──────────────────────────────────────────────────────
     const [
       propertyCount,
@@ -20,23 +32,28 @@ export async function GET() {
       pendingTasks,
     ] = await Promise.all([
       // Total properties
-      prisma.property.count(),
+      prisma.property.count({ where: propScope }),
 
       // Total units
-      prisma.unit.count(),
+      prisma.unit.count({ where: unitScope }),
 
       // Occupied units
-      prisma.unit.count({ where: { status: "OCCUPIED" } }),
+      prisma.unit.count({ where: { status: "OCCUPIED", ...unitScope } }),
 
       // Active tenants
-      prisma.tenant.count({ where: { active: true } }),
+      prisma.tenant.count({ where: { active: true, ...tenantScope } }),
 
       // Unread messages
-      prisma.message.count({ where: { read: false, direction: "INBOUND" } }),
+      prisma.message.count({
+        where: { read: false, direction: "INBOUND", ...tenantDeepScope },
+      }),
 
       // Pending applications
       prisma.application.count({
-        where: { status: { in: ["PENDING", "UNDER_REVIEW"] } },
+        where: {
+          status: { in: ["PENDING", "UNDER_REVIEW"] },
+          ...tenantDeepScope,
+        },
       }),
 
       // Upcoming showings (next 7 days)
@@ -47,6 +64,7 @@ export async function GET() {
             lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           },
           status: { in: ["SCHEDULED", "CONFIRMED"] },
+          property: propScope,
         },
         include: {
           property: { select: { address: true } },
@@ -59,6 +77,7 @@ export async function GET() {
       prisma.notice.findMany({
         where: {
           status: { in: ["DRAFT", "SENT"] },
+          ...tenantDeepScope,
         },
         include: {
           tenant: { select: { firstName: true, lastName: true } },
@@ -69,6 +88,7 @@ export async function GET() {
 
       // Recent events (last 10)
       prisma.event.findMany({
+        where: { property: propScope },
         orderBy: { createdAt: "desc" },
         take: 10,
         include: {
@@ -78,6 +98,7 @@ export async function GET() {
 
       // Properties with units for summary cards
       prisma.property.findMany({
+        where: propScope,
         include: {
           units: {
             include: {
@@ -93,17 +114,18 @@ export async function GET() {
       // Outstanding balances: sum of latest ledger entries per tenant
       prisma.ledgerEntry.groupBy({
         by: ["tenantId"],
+        where: tenantDeepScope,
         _max: { createdAt: true },
       }),
 
       // Pending task count
       prisma.task.count({
-        where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+        where: { status: { in: ["PENDING", "IN_PROGRESS"] }, property: propScope },
       }),
 
       // Top 10 pending tasks
       prisma.task.findMany({
-        where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+        where: { status: { in: ["PENDING", "IN_PROGRESS"] }, property: propScope },
         include: {
           property: { select: { id: true, address: true } },
         },
@@ -132,7 +154,7 @@ export async function GET() {
 
     // Calculate monthly revenue from active leases
     const activeLeases = await prisma.lease.findMany({
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", unit: unitScope },
       select: { rentAmount: true },
     });
     const monthlyRevenue = activeLeases.reduce(

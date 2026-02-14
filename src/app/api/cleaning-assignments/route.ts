@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { logCleaningEvent } from "@/lib/events";
 import { generateWeeklyAssignments, validateCleaningPhotos, validatePhotoData } from "@/lib/cleaning/schedule";
 import { enqueueCleaningReminder } from "@/lib/jobs/cleaning";
+import { getAuthContext } from "@/lib/auth-context";
 
 // GET - List cleaning assignments with filters
 export async function GET(request: NextRequest) {
@@ -32,8 +33,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(assignment);
     }
 
-    // Build where clause
-    const where: Prisma.CleaningAssignmentWhereInput = {};
+    // Non-token requests require auth
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
+    // Build where clause (scoped to org)
+    const where: Prisma.CleaningAssignmentWhereInput = {
+      unit: { property: { organizationId: ctx.organizationId } },
+    };
 
     if (status && status !== "all") {
       where.status = status as Prisma.CleaningAssignmentWhereInput["status"];
@@ -44,7 +51,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (propertyId) {
-      where.unit = { propertyId };
+      where.unit = { propertyId, property: { organizationId: ctx.organizationId } };
     }
 
     if (weekOf) {
@@ -76,39 +83,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { action } = body;
 
-    // Generate weekly assignments for all properties
-    if (action === "generate") {
-      const weekOf = body.weekOf ? new Date(body.weekOf) : undefined;
-      const created = await generateWeeklyAssignments(weekOf);
-
-      // Schedule reminders for each assignment (Sunday morning)
-      for (const assignment of created) {
-        const fullAssignment = await prisma.cleaningAssignment.findUnique({
-          where: { id: assignment.assignmentId },
-          include: {
-            tenant: true,
-            unit: { include: { property: true } },
-          },
-        });
-
-        if (fullAssignment) {
-          await enqueueCleaningReminder({
-            assignmentId: fullAssignment.id,
-            tenantId: fullAssignment.tenantId,
-            propertyId: fullAssignment.unit.propertyId,
-            tenantName: `${fullAssignment.tenant.firstName} ${fullAssignment.tenant.lastName}`,
-            tenantPhone: fullAssignment.tenant.phone,
-            tenantEmail: fullAssignment.tenant.email,
-            weekOf: fullAssignment.weekOf.toISOString(),
-            token: fullAssignment.token,
-          });
-        }
-      }
-
-      return NextResponse.json({ created, count: created.length }, { status: 201 });
-    }
-
-    // Submit photos for an assignment (by token)
+    // Token-based submit (public access for tenants) - no auth required
     if (action === "submit") {
       const { token, photos } = body;
 
@@ -146,7 +121,7 @@ export async function POST(request: NextRequest) {
       const validation = await validateCleaningPhotos(photos);
 
       // Store photo metadata (without full data URLs to save space)
-      const photoMetadata = photos.map((p) => ({
+      const photoMetadata = photos.map((p: { name: string }) => ({
         name: p.name,
         submittedAt: new Date().toISOString(),
       }));
@@ -189,6 +164,42 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // All other actions require auth
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
+    // Generate weekly assignments for all properties
+    if (action === "generate") {
+      const weekOf = body.weekOf ? new Date(body.weekOf) : undefined;
+      const created = await generateWeeklyAssignments(weekOf);
+
+      // Schedule reminders for each assignment (Sunday morning)
+      for (const assignment of created) {
+        const fullAssignment = await prisma.cleaningAssignment.findUnique({
+          where: { id: assignment.assignmentId },
+          include: {
+            tenant: true,
+            unit: { include: { property: true } },
+          },
+        });
+
+        if (fullAssignment) {
+          await enqueueCleaningReminder({
+            assignmentId: fullAssignment.id,
+            tenantId: fullAssignment.tenantId,
+            propertyId: fullAssignment.unit.propertyId,
+            tenantName: `${fullAssignment.tenant.firstName} ${fullAssignment.tenant.lastName}`,
+            tenantPhone: fullAssignment.tenant.phone,
+            tenantEmail: fullAssignment.tenant.email,
+            weekOf: fullAssignment.weekOf.toISOString(),
+            token: fullAssignment.token,
+          });
+        }
+      }
+
+      return NextResponse.json({ created, count: created.length }, { status: 201 });
+    }
+
     // Manual assignment creation
     const { tenantId, unitId, weekOf: manualWeekOf } = body;
 
@@ -204,7 +215,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
     }
 
-    const unit = await prisma.unit.findUnique({ where: { id: unitId }, include: { property: true } });
+    // Verify unit belongs to org
+    const unit = await prisma.unit.findFirst({
+      where: { id: unitId, property: { organizationId: ctx.organizationId } },
+      include: { property: true },
+    });
     if (!unit) {
       return NextResponse.json({ error: "Unit not found" }, { status: 404 });
     }
@@ -240,6 +255,9 @@ export async function POST(request: NextRequest) {
 // PATCH - Update assignment status (validate, fail, etc.)
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, status, notes } = body;
 
@@ -247,8 +265,9 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const assignment = await prisma.cleaningAssignment.findUnique({
-      where: { id },
+    // Verify assignment belongs to org
+    const assignment = await prisma.cleaningAssignment.findFirst({
+      where: { id, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         tenant: true,
         unit: { include: { property: true } },

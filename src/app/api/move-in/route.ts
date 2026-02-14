@@ -7,11 +7,15 @@ import {
   checkMoveInPaymentsReceived,
   getMoveInChecklist,
 } from "@/lib/jobs/welcome-flow";
+import { getAuthContext } from "@/lib/auth-context";
 
 // ─── GET: Check move-in status or get checklist ──────────────────────────────
 
 export async function GET(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
     const action = searchParams.get("action");
@@ -24,7 +28,7 @@ export async function GET(request: Request) {
     // Get move-in status for a specific tenant
     if (tenantId) {
       const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
+        where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
         include: {
           unit: { include: { property: true } },
           leases: { where: { status: "ACTIVE" }, take: 1 },
@@ -75,6 +79,7 @@ export async function GET(request: Request) {
         active: true,
         unitId: { not: null },
         leases: { some: { status: "ACTIVE" } },
+        unit: { property: { organizationId: ctx.organizationId } },
       },
       include: {
         unit: { include: { property: true } },
@@ -89,6 +94,7 @@ export async function GET(request: Request) {
         active: true,
         unitId: { not: null },
         leases: { some: { status: "PENDING_SIGNATURE" } },
+        unit: { property: { organizationId: ctx.organizationId } },
       },
       include: {
         unit: { include: { property: true } },
@@ -139,6 +145,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, moveInDate } = body;
 
@@ -146,9 +155,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "tenantId is required" }, { status: 400 });
     }
 
-    // Fetch tenant with relations
+    // Fetch tenant with relations, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: { include: { property: true } },
         leases: { where: { status: "ACTIVE" }, take: 1 },

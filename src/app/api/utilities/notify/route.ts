@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import {
   sendPropertyUtilityNotifications,
-  sendAllUtilityNotifications,
   sendTestUtilityNotification,
 } from "@/lib/utilities/tenant-notification";
+import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 // Simple in-memory rate limiting (F2)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -41,17 +41,12 @@ function checkRateLimit(key: string): boolean {
  */
 export async function POST(request: NextRequest) {
   try {
-    // F1: Authentication check
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 }
-      );
-    }
+    // F1: Authentication check (multi-tenancy)
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
 
     // F2: Rate limiting
-    const rateLimitKey = session.user.id || session.user.email || "anonymous";
+    const rateLimitKey = ctx.userId;
     if (!checkRateLimit(rateLimitKey)) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Please try again later." },
@@ -99,6 +94,19 @@ export async function POST(request: NextRequest) {
 
     const options = { dryRun: !!dryRun };
 
+    // Verify propertyId belongs to org if provided
+    if (propertyId) {
+      const prop = await prisma.property.findUnique({
+        where: { id: propertyId, organizationId: ctx.organizationId },
+      });
+      if (!prop) {
+        return NextResponse.json(
+          { error: "Property not found" },
+          { status: 404 }
+        );
+      }
+    }
+
     // Send to specific property or all properties
     if (propertyId) {
       const result = await sendPropertyUtilityNotifications(propertyId, period, options);
@@ -121,8 +129,20 @@ export async function POST(request: NextRequest) {
         notifications: result.notifications,
       });
     } else {
-      // Send to all properties
-      const results = await sendAllUtilityNotifications(period, options);
+      // Send to all org properties with bills for this period
+      const orgProperties = await prisma.property.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          utilityBills: { some: { period } },
+        },
+        select: { id: true },
+      });
+
+      const results = [];
+      for (const prop of orgProperties) {
+        const result = await sendPropertyUtilityNotifications(prop.id, period, options);
+        if (result) results.push(result);
+      }
 
       const totalSent = results.reduce((sum, r) => sum + r.sent, 0);
       const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 interface TenantSplit {
   tenantId: string;
@@ -28,6 +29,9 @@ interface BillSplit {
  */
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const propertyId = searchParams.get("propertyId");
     const period = searchParams.get("period");
@@ -36,6 +40,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { error: "propertyId is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found" },
+        { status: 404 }
       );
     }
 

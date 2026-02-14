@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createEvent, queryEvents } from "@/lib/events";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * POST /api/events/test
@@ -8,7 +9,23 @@ import { prisma } from "@/lib/db";
  */
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
+
+    // Verify propertyId belongs to org if provided
+    if (body.propertyId) {
+      const property = await prisma.property.findFirst({
+        where: { id: body.propertyId, organizationId: ctx.organizationId },
+      });
+      if (!property) {
+        return NextResponse.json(
+          { success: false, error: "Property not found" },
+          { status: 404 }
+        );
+      }
+    }
 
     const event = await createEvent({
       type: body.type ?? "SYSTEM",
@@ -37,6 +54,9 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId") ?? undefined;
     const propertyId = searchParams.get("propertyId") ?? undefined;
@@ -53,8 +73,10 @@ export async function GET(request: NextRequest) {
       note: "Event system only exposes create and query operations. No update or delete functions are available.",
     };
 
-    // Count total events
-    const total = await prisma.event.count();
+    // Count total events scoped to org
+    const total = await prisma.event.count({
+      where: { property: { organizationId: ctx.organizationId } },
+    });
 
     return NextResponse.json({
       success: true,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logCleaningEvent } from "@/lib/events";
 import { applyCleaningFee, getCleaningFeeAmount } from "@/lib/cleaning/schedule";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * POST - Validate or fail a submitted cleaning assignment.
@@ -9,6 +10,9 @@ import { applyCleaningFee, getCleaningFeeAmount } from "@/lib/cleaning/schedule"
  */
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { assignmentId, action, notes } = body;
 
@@ -23,8 +27,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const assignment = await prisma.cleaningAssignment.findUnique({
-      where: { id: assignmentId },
+    // Verify assignment belongs to org
+    const assignment = await prisma.cleaningAssignment.findFirst({
+      where: { id: assignmentId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         tenant: true,
         unit: { include: { property: true } },

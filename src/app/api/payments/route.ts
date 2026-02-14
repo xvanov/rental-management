@@ -2,26 +2,42 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logPaymentEvent } from "@/lib/events";
 import { Prisma } from "@/generated/prisma/client";
+import { getAuthContext } from "@/lib/auth-context";
+import { resolveNoticesIfPaid } from "@/lib/enforcement/resolve-notices";
 
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get("tenantId");
     const propertyId = searchParams.get("propertyId");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
     const method = searchParams.get("method");
+    const status = searchParams.get("status");
     const limit = parseInt(searchParams.get("limit") || "50");
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    const where: Prisma.PaymentWhereInput = {};
+    const where: Prisma.PaymentWhereInput = {
+      tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+    };
+
+    if (status) {
+      where.status = status as Prisma.EnumPaymentStatusFilter["equals"];
+    }
 
     if (tenantId) {
       where.tenantId = tenantId;
     }
 
     if (propertyId) {
-      where.tenant = { unitId: { not: null }, unit: { propertyId } };
+      where.tenant = {
+        ...where.tenant as Prisma.TenantWhereInput,
+        unitId: { not: null },
+        unit: { propertyId, property: { organizationId: ctx.organizationId } },
+      };
     }
 
     if (method) {
@@ -34,7 +50,7 @@ export async function GET(req: NextRequest) {
       if (endDate) where.date.lte = new Date(endDate);
     }
 
-    const [payments, total] = await Promise.all([
+    const [payments, total, pendingCount] = await Promise.all([
       prisma.payment.findMany({
         where,
         include: {
@@ -51,9 +67,15 @@ export async function GET(req: NextRequest) {
         skip: offset,
       }),
       prisma.payment.count({ where }),
+      prisma.payment.count({
+        where: {
+          status: "PENDING",
+          tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+        },
+      }),
     ]);
 
-    return NextResponse.json({ payments, total });
+    return NextResponse.json({ payments, total, pendingCount });
   } catch (error) {
     console.error("Failed to fetch payments:", error);
     return NextResponse.json(
@@ -65,6 +87,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { tenantId, amount, method, date, note } = body;
 
@@ -83,9 +108,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+    // Verify tenant exists and belongs to the user's organization
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: { unit: true },
     });
 
@@ -147,6 +172,10 @@ export async function POST(req: NextRequest) {
         propertyId: tenant.unit?.propertyId || undefined,
       }
     );
+
+    // Auto-resolve outstanding notices if rent+fees are now fully paid
+    const period = formatPeriod(new Date(date));
+    await resolveNoticesIfPaid(tenantId, period);
 
     return NextResponse.json(payment, { status: 201 });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * GET /api/ledger/export
@@ -8,6 +9,9 @@ import { prisma } from "@/lib/db";
  */
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get("tenantId");
     const format = searchParams.get("format") || "csv";
@@ -26,7 +30,7 @@ export async function GET(req: NextRequest) {
       include: { unit: { include: { property: true } } },
     });
 
-    if (!tenant) {
+    if (!tenant || tenant.unit?.property?.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Tenant not found" },
         { status: 404 }

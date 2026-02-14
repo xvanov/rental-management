@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendSms } from "@/lib/integrations/twilio";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * Send an SMS message to a tenant.
@@ -9,6 +10,9 @@ import { prisma } from "@/lib/db";
  */
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, content } = body;
 
@@ -19,9 +23,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Look up tenant to get phone number
+    // Look up tenant to get phone number, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       select: {
         id: true,
         phone: true,

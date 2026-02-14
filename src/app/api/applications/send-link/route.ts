@@ -3,9 +3,13 @@ import { prisma } from "@/lib/db";
 import { sendSms } from "@/lib/integrations/twilio";
 import { sendEmail } from "@/lib/integrations/sendgrid";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { applicationId, channel, to } = body;
 
@@ -16,8 +20,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const application = await prisma.application.findUnique({
-      where: { id: applicationId },
+    // Verify application belongs to org
+    const application = await prisma.application.findFirst({
+      where: {
+        id: applicationId,
+        tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+      },
     });
 
     if (!application) {

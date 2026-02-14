@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * GET /api/notices/print?noticeId=xxx - Generate a printable HTML page for a notice.
@@ -7,6 +8,9 @@ import { prisma } from "@/lib/db";
  */
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const noticeId = searchParams.get("noticeId");
 
@@ -14,8 +18,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "noticeId is required" }, { status: 400 });
     }
 
-    const notice = await prisma.notice.findUnique({
-      where: { id: noticeId },
+    const notice = await prisma.notice.findFirst({
+      where: { id: noticeId, tenant: { unit: { property: { organizationId: ctx.organizationId } } } },
       include: {
         tenant: {
           select: {

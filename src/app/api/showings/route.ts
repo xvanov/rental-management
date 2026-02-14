@@ -2,16 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
 import { getQueue } from "@/lib/jobs";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const propertyId = searchParams.get("propertyId");
     const status = searchParams.get("status");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      property: { organizationId: ctx.organizationId },
+    };
 
     if (propertyId) where.propertyId = propertyId;
     if (status) where.status = status;
@@ -43,6 +49,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { propertyId, date, attendeeName, attendeePhone, attendeeEmail, notes } = body;
 
@@ -50,6 +59,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "propertyId and date are required" },
         { status: 400 }
+      );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found" },
+        { status: 404 }
       );
     }
 
@@ -114,6 +134,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, status, notes } = body;
 
@@ -129,6 +152,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: "Invalid status" },
         { status: 400 }
+      );
+    }
+
+    // Verify showing belongs to org via property
+    const existing = await prisma.showing.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Showing not found" },
+        { status: 404 }
       );
     }
 

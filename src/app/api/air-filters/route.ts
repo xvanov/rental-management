@@ -6,10 +6,15 @@ import {
   getNextDueDate,
   cadenceToMonths,
 } from "@/lib/air-filters";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET() {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const configs = await prisma.airFilterConfig.findMany({
+      where: { property: { organizationId: ctx.organizationId } },
       include: {
         property: { select: { id: true, address: true, city: true, state: true } },
         filters: { orderBy: { createdAt: "asc" } },
@@ -39,6 +44,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { propertyId, cadence, filters, notes } = body;
 
@@ -46,6 +54,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "propertyId is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found in your organization" },
+        { status: 404 }
       );
     }
 
@@ -109,6 +128,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, cadence, notes } = body;
 
@@ -116,6 +138,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: "Config id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify config belongs to org
+    const existing = await prisma.airFilterConfig.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Config not found in your organization" },
+        { status: 404 }
       );
     }
 
@@ -144,6 +177,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -154,8 +190,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const config = await prisma.airFilterConfig.findUnique({
-      where: { id },
+    const config = await prisma.airFilterConfig.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
       select: { propertyId: true },
     });
 

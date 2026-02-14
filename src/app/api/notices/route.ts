@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
 import { Prisma } from "@/generated/prisma/client";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * GET /api/notices - List notices with optional filters
@@ -9,6 +10,9 @@ import { Prisma } from "@/generated/prisma/client";
  */
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
     const type = searchParams.get("type");
@@ -16,7 +20,9 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") ?? "50");
     const offset = parseInt(searchParams.get("offset") ?? "0");
 
-    const where: Prisma.NoticeWhereInput = {};
+    const where: Prisma.NoticeWhereInput = {
+      tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+    };
     if (tenantId) where.tenantId = tenantId;
     if (type) where.type = type as Prisma.EnumNoticeTypeFilter;
     if (status) where.status = status as Prisma.EnumNoticeStatusFilter;
@@ -65,6 +71,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, type, content, sendVia } = body;
 
@@ -83,9 +92,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+    // Verify tenant exists and belongs to org
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       select: { id: true, firstName: true, lastName: true, phone: true, email: true },
     });
 
@@ -135,6 +144,9 @@ export async function POST(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { noticeId, status, proofOfService } = body;
 
@@ -145,8 +157,9 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.notice.findUnique({
-      where: { id: noticeId },
+    // Verify notice belongs to org via tenant -> unit -> property
+    const existing = await prisma.notice.findFirst({
+      where: { id: noticeId, tenant: { unit: { property: { organizationId: ctx.organizationId } } } },
     });
 
     if (!existing) {

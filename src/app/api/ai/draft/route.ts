@@ -1,11 +1,15 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateDraftReply } from "@/lib/ai";
 import type { ConversationMessage } from "@/lib/ai";
 import { logSystemEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId } = body;
 
@@ -16,9 +20,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get tenant info with lease and unit data
+    // Get tenant info with lease and unit data, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: {
           select: {

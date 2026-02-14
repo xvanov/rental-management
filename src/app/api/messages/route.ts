@@ -4,15 +4,28 @@ import { logMessageEvent } from "@/lib/events";
 import { sendSms } from "@/lib/integrations/twilio";
 import { sendEmail } from "@/lib/integrations/sendgrid";
 import { sendFacebookMessage, isFacebookConfigured } from "@/lib/integrations/facebook";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
     const channel = searchParams.get("channel");
     const unreadOnly = searchParams.get("unreadOnly") === "true";
 
     if (tenantId) {
+      // Verify tenant belongs to this org
+      const tenant = await prisma.tenant.findFirst({
+        where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
+        select: { id: true },
+      });
+      if (!tenant) {
+        return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+      }
+
       // Get conversation messages for a specific tenant
       const where: Record<string, unknown> = { tenantId };
       if (channel) where.channel = channel;
@@ -34,6 +47,7 @@ export async function GET(request: NextRequest) {
     const conversations = await prisma.tenant.findMany({
       where: {
         messages: { some: {} },
+        unit: { property: { organizationId: ctx.organizationId } },
       },
       include: {
         messages: {
@@ -68,7 +82,7 @@ export async function GET(request: NextRequest) {
     // Get unread counts per tenant
     const unreadCounts = await prisma.message.groupBy({
       by: ["tenantId"],
-      where: { read: false, direction: "INBOUND" },
+      where: { read: false, direction: "INBOUND", tenant: { unit: { property: { organizationId: ctx.organizationId } } } },
       _count: { id: true },
     });
 
@@ -99,6 +113,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, channel, content } = body;
 
@@ -116,9 +133,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get tenant info for event logging
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+    // Get tenant info for event logging (scoped to org)
+    const tenant = await prisma.tenant.findFirst({
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       select: { id: true, phone: true, email: true, unitId: true, unit: { select: { propertyId: true } } },
     });
 

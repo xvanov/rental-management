@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get("tenantId");
     const period = searchParams.get("period");
@@ -11,7 +15,9 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "100");
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    const where: Prisma.LedgerEntryWhereInput = {};
+    const where: Prisma.LedgerEntryWhereInput = {
+      tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+    };
 
     if (tenantId) where.tenantId = tenantId;
     if (period) where.period = period;
@@ -47,6 +53,9 @@ export async function GET(req: NextRequest) {
 // POST - Create a manual ledger entry (for utilities, credits, deductions)
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { tenantId, type, amount, description, period } = body;
 
@@ -57,12 +66,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate tenant exists
+    // Validate tenant exists and belongs to this org
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
+      include: { unit: { include: { property: true } } },
     });
 
-    if (!tenant) {
+    if (!tenant || tenant.unit?.property?.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Tenant not found" },
         { status: 404 }

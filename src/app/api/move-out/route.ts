@@ -8,18 +8,22 @@ import {
   getDepositAmount,
   calculateAutoDeductions,
 } from "@/lib/jobs/move-out-flow";
+import { getAuthContext } from "@/lib/auth-context";
 
 // ─── GET: List move-out candidates and status ────────────────────────────────
 
 export async function GET(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
 
     // Get status for a specific tenant
     if (tenantId) {
       const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
+        where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
         include: {
           unit: { include: { property: true } },
           leases: { where: { status: { in: ["ACTIVE", "TERMINATED"] } }, orderBy: { createdAt: "desc" }, take: 1 },
@@ -88,6 +92,7 @@ export async function GET(request: Request) {
         active: true,
         unitId: { not: null },
         leases: { some: { status: "ACTIVE" } },
+        unit: { property: { organizationId: ctx.organizationId } },
       },
       include: {
         unit: { include: { property: true } },
@@ -103,6 +108,7 @@ export async function GET(request: Request) {
         unitId: { not: null },
         leases: { some: { status: "TERMINATED" } },
         NOT: { leases: { some: { status: "ACTIVE" } } },
+        unit: { property: { organizationId: ctx.organizationId } },
       },
       include: {
         unit: { include: { property: true } },
@@ -173,6 +179,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, moveOutDate } = body;
 
@@ -184,9 +193,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "moveOutDate is required" }, { status: 400 });
     }
 
-    // Fetch tenant with relations
+    // Fetch tenant with relations, scoped to org
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: { include: { property: true } },
         leases: { where: { status: "ACTIVE" }, take: 1 },

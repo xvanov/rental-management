@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateLeasePdfBuffer } from "@/lib/lease-pdf";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -25,7 +29,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    if (!lease) {
+    if (!lease || lease.unit.property.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Lease not found" },
         { status: 404 }

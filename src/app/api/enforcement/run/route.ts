@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { evaluateEnforcementRules } from "@/lib/enforcement/rules-engine";
 import { processEnforcementActions, startEnforcementWorker } from "@/lib/jobs/enforcement";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * POST /api/enforcement/run - Evaluate enforcement rules and process actions.
@@ -9,11 +10,14 @@ import { createEvent } from "@/lib/events";
  */
 export async function POST() {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     // Start the worker if not already running
     startEnforcementWorker();
 
-    // Evaluate all active leases against enforcement rules
-    const actions = await evaluateEnforcementRules();
+    // Evaluate active leases against enforcement rules, scoped to org
+    const actions = await evaluateEnforcementRules({ organizationId: ctx.organizationId });
 
     if (actions.length === 0) {
       return NextResponse.json({

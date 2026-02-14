@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");
     const token = searchParams.get("token");
 
-    // Fetch single application by token (public access for form)
+    // Fetch single application by token (public access for form - no auth required)
     if (token) {
       const application = await prisma.application.findUnique({
         where: { token },
@@ -24,8 +25,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(application);
     }
 
-    // Fetch all applications (dashboard use)
-    const where: Record<string, unknown> = {};
+    // Authenticated: fetch all applications (dashboard use)
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
+    const where: Record<string, unknown> = {
+      tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+    };
     if (status) where.status = status;
 
     const applications = await prisma.application.findMany({
@@ -50,6 +56,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, propertyId } = body;
 
@@ -93,6 +102,23 @@ export async function PATCH(request: NextRequest) {
         { error: "id or token is required" },
         { status: 400 }
       );
+    }
+
+    // Token-based updates are public (form submission); id-based updates require auth
+    if (id && !token) {
+      const ctx = await getAuthContext();
+      if (ctx instanceof NextResponse) return ctx;
+
+      // Verify application belongs to org
+      const orgApp = await prisma.application.findFirst({
+        where: { id, tenant: { unit: { property: { organizationId: ctx.organizationId } } } },
+      });
+      if (!orgApp) {
+        return NextResponse.json(
+          { error: "Application not found" },
+          { status: 404 }
+        );
+      }
     }
 
     const existing = await prisma.application.findUnique({

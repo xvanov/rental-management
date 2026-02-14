@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logSystemEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { billId } = body;
 
@@ -14,9 +18,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Fetch the utility bill
-    const bill = await prisma.utilityBill.findUnique({
-      where: { id: billId },
+    // Fetch the utility bill (scoped to org)
+    const bill = await prisma.utilityBill.findFirst({
+      where: { id: billId, property: { organizationId: ctx.organizationId } },
       include: { property: true },
     });
 
@@ -34,12 +38,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find all active tenants in this property (tenants assigned to units in this property)
+    // Find all active tenants in this property (tenants assigned to units in this property, scoped to org)
     const activeTenants = await prisma.tenant.findMany({
       where: {
         active: true,
         unit: {
           propertyId: bill.propertyId,
+          property: { organizationId: ctx.organizationId },
           status: "OCCUPIED",
         },
       },

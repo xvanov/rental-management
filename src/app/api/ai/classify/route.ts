@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { classifyMessage } from "@/lib/ai";
 import { logSystemEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { messageId, content, tenantId } = body;
 
@@ -15,11 +19,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get context if tenantId is provided
+    // Get context if tenantId is provided, verify tenant belongs to org
     let context: { tenantName?: string; unitName?: string; propertyAddress?: string } = {};
     if (tenantId) {
       const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
+        where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
         include: {
           unit: {
             include: {
@@ -28,13 +32,17 @@ export async function POST(request: NextRequest) {
           },
         },
       });
-      if (tenant) {
-        context = {
-          tenantName: `${tenant.firstName} ${tenant.lastName}`,
-          unitName: tenant.unit?.name,
-          propertyAddress: tenant.unit?.property?.address,
-        };
+      if (!tenant) {
+        return NextResponse.json(
+          { error: "Tenant not found in your organization" },
+          { status: 404 }
+        );
       }
+      context = {
+        tenantName: `${tenant.firstName} ${tenant.lastName}`,
+        unitName: tenant.unit?.name,
+        propertyAddress: tenant.unit?.property?.address,
+      };
     }
 
     const classification = await classifyMessage(content, context);

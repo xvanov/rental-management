@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
 import { sendEmail } from "@/lib/integrations/sendgrid";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { leaseId } = body;
 
@@ -23,7 +27,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if (!lease) {
+    if (!lease || lease.unit.property.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Lease not found" },
         { status: 404 }

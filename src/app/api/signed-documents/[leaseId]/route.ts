@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 import fs from "fs";
 import path from "path";
 
@@ -8,14 +9,17 @@ export async function GET(
   { params }: { params: Promise<{ leaseId: string }> }
 ) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { leaseId } = await params;
 
     const lease = await prisma.lease.findUnique({
       where: { id: leaseId },
-      include: { tenant: true, unit: true },
+      include: { tenant: true, unit: { include: { property: true } } },
     });
 
-    if (!lease) {
+    if (!lease || lease.unit.property.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Lease not found" },
         { status: 404 }

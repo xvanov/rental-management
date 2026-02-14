@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAvailableSlots, isCalendarConfigured } from "@/lib/integrations/google-calendar";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const propertyId = searchParams.get("propertyId");
     const startDate = searchParams.get("startDate");
@@ -13,6 +17,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { error: "propertyId is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found" },
+        { status: 404 }
       );
     }
 

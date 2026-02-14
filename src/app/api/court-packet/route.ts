@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateCourtPacketPdf, CourtPacketData } from "@/lib/pdf/court-packet";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * GET /api/court-packet?tenantId=xxx&startDate=...&endDate=...
@@ -10,6 +11,9 @@ import { createEvent } from "@/lib/events";
  */
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const tenantId = searchParams.get("tenantId");
     const startDate = searchParams.get("startDate");
@@ -20,7 +24,7 @@ export async function GET(request: NextRequest) {
     }
 
     const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
+      where: { id: tenantId, unit: { property: { organizationId: ctx.organizationId } } },
       include: {
         unit: {
           include: {

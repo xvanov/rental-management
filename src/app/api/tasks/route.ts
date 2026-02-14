@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
     const propertyId = searchParams.get("propertyId");
     const source = searchParams.get("source");
     const includeCompleted = searchParams.get("includeCompleted") === "true";
 
-    const where: Prisma.TaskWhereInput = {};
+    const where: Prisma.TaskWhereInput = {
+      property: { organizationId: ctx.organizationId },
+    };
 
     if (status) {
       where.status = status as Prisma.EnumTaskStatusFilter;
@@ -46,6 +52,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { title, description, priority, propertyId, dueDate } = body;
 
@@ -54,6 +63,19 @@ export async function POST(request: NextRequest) {
         { error: "Title is required" },
         { status: 400 }
       );
+    }
+
+    // Verify property belongs to org if provided
+    if (propertyId) {
+      const property = await prisma.property.findFirst({
+        where: { id: propertyId, organizationId: ctx.organizationId },
+      });
+      if (!property) {
+        return NextResponse.json(
+          { error: "Property not found" },
+          { status: 404 }
+        );
+      }
     }
 
     const task = await prisma.task.create({
@@ -82,6 +104,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, status, title, description, priority, dueDate } = body;
 
@@ -89,6 +114,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: "Task id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify task belongs to org
+    const existing = await prisma.task.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Task not found" },
+        { status: 404 }
       );
     }
 
@@ -127,6 +163,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -134,6 +173,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         { error: "Task id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify task belongs to org
+    const existing = await prisma.task.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Task not found" },
+        { status: 404 }
       );
     }
 

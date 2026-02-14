@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { logMaintenanceEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { configId, date, filterIds } = body;
 
@@ -16,8 +20,9 @@ export async function POST(request: NextRequest) {
 
     const changeDate = date ? new Date(date) : new Date();
 
-    const config = await prisma.airFilterConfig.findUnique({
-      where: { id: configId },
+    // Verify config belongs to org
+    const config = await prisma.airFilterConfig.findFirst({
+      where: { id: configId, property: { organizationId: ctx.organizationId } },
       include: { filters: true },
     });
 

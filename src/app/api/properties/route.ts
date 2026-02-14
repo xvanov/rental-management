@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET() {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const properties = await prisma.property.findMany({
+      where: { organizationId: ctx.organizationId },
       include: {
         units: {
           include: {
@@ -28,6 +33,9 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { address, city, state, zip, jurisdiction } = body;
 
@@ -39,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const property = await prisma.property.create({
-      data: { address, city, state, zip, jurisdiction },
+      data: { address, city, state, zip, jurisdiction, organizationId: ctx.organizationId },
       include: { units: true },
     });
 

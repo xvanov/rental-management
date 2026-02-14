@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     const search = searchParams.get("search");
 
     if (id) {
-      const tenant = await prisma.tenant.findUnique({
-        where: { id },
+      const tenant = await prisma.tenant.findFirst({
+        where: { id, unit: { property: { organizationId: ctx.organizationId } } },
         include: {
           unit: {
             include: {
@@ -38,7 +42,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(tenant);
     }
 
-    const where: Record<string, unknown> = { active: true };
+    const where: Record<string, unknown> = {
+      active: true,
+      unit: { property: { organizationId: ctx.organizationId } },
+    };
 
     if (search) {
       where.OR = [
@@ -81,6 +88,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { firstName, lastName, email, phone, unitId } = body;
 
@@ -89,6 +99,19 @@ export async function POST(request: NextRequest) {
         { error: "First name and last name are required" },
         { status: 400 }
       );
+    }
+
+    // Verify the unit belongs to the user's organization
+    if (unitId) {
+      const unit = await prisma.unit.findFirst({
+        where: { id: unitId, property: { organizationId: ctx.organizationId } },
+      });
+      if (!unit) {
+        return NextResponse.json(
+          { error: "Unit not found in your organization" },
+          { status: 404 }
+        );
+      }
     }
 
     const tenant = await prisma.tenant.create({
@@ -120,6 +143,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, firstName, lastName, email, phone, unitId, occupantCount, moveInDate, moveOutDate, active } = body;
 
@@ -128,6 +154,30 @@ export async function PATCH(request: NextRequest) {
         { error: "Tenant ID is required" },
         { status: 400 }
       );
+    }
+
+    // Verify the tenant belongs to the user's organization
+    const existingTenant = await prisma.tenant.findFirst({
+      where: { id, unit: { property: { organizationId: ctx.organizationId } } },
+    });
+    if (!existingTenant) {
+      return NextResponse.json(
+        { error: "Tenant not found" },
+        { status: 404 }
+      );
+    }
+
+    // If unitId is being changed, verify the new unit belongs to the org
+    if (unitId !== undefined && unitId) {
+      const unit = await prisma.unit.findFirst({
+        where: { id: unitId, property: { organizationId: ctx.organizationId } },
+      });
+      if (!unit) {
+        return NextResponse.json(
+          { error: "Unit not found in your organization" },
+          { status: 404 }
+        );
+      }
     }
 
     // Build update data - only include fields that are provided

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendGroupSms } from "@/lib/integrations/twilio";
+import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 /**
  * Send a group SMS to all tenants in a property.
@@ -8,6 +10,9 @@ import { sendGroupSms } from "@/lib/integrations/twilio";
  */
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { propertyId, content } = body;
 
@@ -15,6 +20,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "propertyId and content are required" },
         { status: 400 }
+      );
+    }
+
+    // Verify property belongs to org
+    const property = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId: ctx.organizationId },
+    });
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found in your organization" },
+        { status: 404 }
       );
     }
 

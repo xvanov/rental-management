@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const propertyId = searchParams.get("propertyId");
     const months = parseInt(searchParams.get("months") || "6");
@@ -12,8 +16,9 @@ export async function GET(req: NextRequest) {
     const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
     const startPeriod = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}`;
 
-    const where: { propertyId?: string; period?: { gte: string } } = {
+    const where: { propertyId?: string; period?: { gte: string }; property?: { organizationId: string } } = {
       period: { gte: startPeriod },
+      property: { organizationId: ctx.organizationId },
     };
     if (propertyId) where.propertyId = propertyId;
 
@@ -81,9 +86,12 @@ export async function GET(req: NextRequest) {
       where: {
         type: "UTILITY",
         period: { gte: startPeriod },
-        ...(propertyId
-          ? { tenant: { unit: { propertyId } } }
-          : {}),
+        tenant: {
+          unit: {
+            property: { organizationId: ctx.organizationId },
+            ...(propertyId ? { propertyId } : {}),
+          },
+        },
       },
       include: {
         tenant: {

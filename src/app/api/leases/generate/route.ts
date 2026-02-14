@@ -3,9 +3,13 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
 import { parseLeaseClausesFromContent } from "@/lib/lease-parser";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { templateId, tenantId, unitId, startDate, endDate, rentAmount, securityDeposit, lessorName, customFields } = body;
 
@@ -37,37 +41,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch template
+    // Fetch template and verify it belongs to this org
     const template = await prisma.leaseTemplate.findUnique({
       where: { id: templateId },
     });
 
-    if (!template) {
+    if (!template || template.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Template not found" },
         { status: 404 }
       );
     }
 
-    // Fetch tenant
+    // Fetch tenant and verify it belongs to this org
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
+      include: { unit: { include: { property: true } } },
     });
 
-    if (!tenant) {
+    if (!tenant || tenant.unit?.property?.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Tenant not found" },
         { status: 404 }
       );
     }
 
-    // Fetch unit with property
+    // Fetch unit with property and verify it belongs to this org
     const unit = await prisma.unit.findUnique({
       where: { id: unitId },
       include: { property: true },
     });
 
-    if (!unit) {
+    if (!unit || unit.property.organizationId !== ctx.organizationId) {
       return NextResponse.json(
         { error: "Unit not found" },
         { status: 404 }

@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const propertyId = searchParams.get("propertyId");
     const period = searchParams.get("period");
@@ -11,7 +15,9 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "100");
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    const where: Prisma.UtilityBillWhereInput = {};
+    const where: Prisma.UtilityBillWhereInput = {
+      property: { organizationId: ctx.organizationId },
+    };
 
     if (propertyId) where.propertyId = propertyId;
     if (period) where.period = period;
@@ -42,6 +48,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { propertyId, provider, type, amount, billingStart, billingEnd, period, note } = body;
 
@@ -59,9 +68,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate property exists
+    // Validate property exists and belongs to org
     const property = await prisma.property.findUnique({
-      where: { id: propertyId },
+      where: { id: propertyId, organizationId: ctx.organizationId },
     });
 
     if (!property) {
@@ -103,6 +112,9 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await req.json();
     const { id, amount, period, billingStart, billingEnd, note } = body;
 
@@ -110,6 +122,17 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json(
         { error: "id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify bill belongs to org
+    const existing = await prisma.utilityBill.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Utility bill not found" },
+        { status: 404 }
       );
     }
 
@@ -151,6 +174,9 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 
@@ -158,6 +184,17 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json(
         { error: "id is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify bill belongs to org
+    const existing = await prisma.utilityBill.findFirst({
+      where: { id, property: { organizationId: ctx.organizationId } },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Utility bill not found" },
+        { status: 404 }
       );
     }
 

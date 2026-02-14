@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
     if (id) {
-      const template = await prisma.leaseTemplate.findUnique({
-        where: { id },
+      const template = await prisma.leaseTemplate.findFirst({
+        where: { id, organizationId: ctx.organizationId },
         include: { leases: { select: { id: true, status: true } } },
       });
 
@@ -23,6 +27,7 @@ export async function GET(request: NextRequest) {
     }
 
     const templates = await prisma.leaseTemplate.findMany({
+      where: { organizationId: ctx.organizationId },
       orderBy: { updatedAt: "desc" },
       include: {
         _count: { select: { leases: true } },
@@ -41,6 +46,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { name, content, description, jurisdiction } = body;
 
@@ -52,7 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     const template = await prisma.leaseTemplate.create({
-      data: { name, content, description, jurisdiction },
+      data: { name, content, description, jurisdiction, organizationId: ctx.organizationId },
     });
 
     return NextResponse.json(template, { status: 201 });
@@ -67,6 +75,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, name, content, description, jurisdiction } = body;
 
@@ -77,8 +88,8 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.leaseTemplate.findUnique({
-      where: { id },
+    const existing = await prisma.leaseTemplate.findFirst({
+      where: { id, organizationId: ctx.organizationId },
     });
 
     if (!existing) {
@@ -111,6 +122,9 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -121,8 +135,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.leaseTemplate.findUnique({
-      where: { id },
+    const existing = await prisma.leaseTemplate.findFirst({
+      where: { id, organizationId: ctx.organizationId },
       include: { _count: { select: { leases: true } } },
     });
 

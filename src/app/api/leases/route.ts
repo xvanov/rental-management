@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { createEvent } from "@/lib/events";
+import { getAuthContext } from "@/lib/auth-context";
 
 export async function GET(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     const tenantId = searchParams.get("tenantId");
     const status = searchParams.get("status");
 
     if (id) {
-      const lease = await prisma.lease.findUnique({
-        where: { id },
+      const lease = await prisma.lease.findFirst({
+        where: { id, unit: { property: { organizationId: ctx.organizationId } } },
         include: {
           tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
           unit: { include: { property: true } },
@@ -30,7 +34,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(lease);
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      unit: { property: { organizationId: ctx.organizationId } },
+    };
     if (tenantId) where.tenantId = tenantId;
     if (status) where.status = status;
 
@@ -57,6 +63,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { tenantId, unitId, templateId, content, rentAmount, startDate, endDate } = body;
 
@@ -64,6 +73,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "tenantId, unitId, content, and startDate are required" },
         { status: 400 }
+      );
+    }
+
+    // Verify the unit belongs to the current organization
+    const unit = await prisma.unit.findFirst({
+      where: { id: unitId, property: { organizationId: ctx.organizationId } },
+    });
+
+    if (!unit) {
+      return NextResponse.json(
+        { error: "Unit not found" },
+        { status: 404 }
       );
     }
 
@@ -121,6 +142,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const ctx = await getAuthContext();
+    if (ctx instanceof NextResponse) return ctx;
+
     const body = await request.json();
     const { id, status, content, rentAmount, startDate, endDate, signedAt, signedDocumentUrl } = body;
 
@@ -131,8 +155,8 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.lease.findUnique({
-      where: { id },
+    const existing = await prisma.lease.findFirst({
+      where: { id, unit: { property: { organizationId: ctx.organizationId } } },
       include: { unit: true },
     });
 
