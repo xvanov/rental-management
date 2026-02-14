@@ -22,10 +22,11 @@ export interface EnforcementContext {
   lateFeeAmount: number;
   lateFeeType: "fixed" | "percentage";
   propertyAddress: string;
+  materialBreachDay: number | null;
 }
 
 export interface EnforcementAction {
-  type: "RENT_REMINDER" | "LATE_NOTICE" | "LATE_FEE" | "VIOLATION_NOTICE" | "ESCALATION";
+  type: "RENT_REMINDER" | "LATE_NOTICE" | "LATE_FEE" | "VIOLATION_NOTICE" | "ESCALATION" | "MATERIAL_BREACH";
   tenantId: string;
   leaseId: string;
   propertyId: string;
@@ -39,15 +40,23 @@ export interface EnforcementAction {
 /**
  * Evaluate all active leases and determine what enforcement actions are needed.
  * Returns a list of actions that should be taken.
+ * Optionally scoped to a specific organization.
  */
-export async function evaluateEnforcementRules(): Promise<EnforcementAction[]> {
+export async function evaluateEnforcementRules(
+  options?: { organizationId?: string }
+): Promise<EnforcementAction[]> {
   const actions: EnforcementAction[] = [];
   const now = new Date();
   const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   // Get all active leases with their clauses, tenant, and unit
   const activeLeases = await prisma.lease.findMany({
-    where: { status: "ACTIVE" },
+    where: {
+      status: "ACTIVE",
+      ...(options?.organizationId
+        ? { unit: { property: { organizationId: options.organizationId } } }
+        : {}),
+    },
     include: {
       clauses: true,
       tenant: true,
@@ -72,6 +81,10 @@ export async function evaluateEnforcementRules(): Promise<EnforcementAction[]> {
     // Check for escalation of existing notices
     const escalationActions = await checkEscalation(context, now);
     actions.push(...escalationActions);
+
+    // Check for material breach (eviction warning)
+    const breachActions = await checkMaterialBreach(context, now, currentPeriod);
+    actions.push(...breachActions);
   }
 
   return actions;
@@ -95,6 +108,7 @@ function buildEnforcementContext(lease: {
   let gracePeriodDays = 5;
   let lateFeeAmount = 50;
   let lateFeeType: "fixed" | "percentage" = "fixed";
+  let materialBreachDay: number | null = null;
 
   for (const clause of lease.clauses) {
     const meta = clause.metadata as Record<string, unknown> | null;
@@ -111,7 +125,15 @@ function buildEnforcementContext(lease: {
         lateFeeAmount = (meta.amount as number) ?? 50;
         lateFeeType = (meta.type as "fixed" | "percentage") ?? "fixed";
         break;
+      case "MATERIAL_BREACH":
+        materialBreachDay = (meta.breachDay as number) ?? 10;
+        break;
     }
+  }
+
+  // Pre-compute dollar amount for percentage-based late fees
+  if (lateFeeType === "percentage") {
+    lateFeeAmount = rentAmount * (lateFeeAmount / 100);
   }
 
   return {
@@ -128,6 +150,7 @@ function buildEnforcementContext(lease: {
     lateFeeAmount,
     lateFeeType,
     propertyAddress: lease.unit.property.address,
+    materialBreachDay,
   };
 }
 
@@ -284,6 +307,52 @@ async function checkEscalation(
   return actions;
 }
 
+/**
+ * Check if material breach threshold has been met (rent unpaid by breach day).
+ * Issues EVICTION_WARNING notice if no existing one for this period.
+ */
+async function checkMaterialBreach(
+  context: EnforcementContext,
+  now: Date,
+  period: string
+): Promise<EnforcementAction[]> {
+  const actions: EnforcementAction[] = [];
+
+  if (!context.materialBreachDay) return actions;
+
+  const dayOfMonth = now.getDate();
+  if (dayOfMonth < context.materialBreachDay) return actions;
+
+  // Check if rent has been paid
+  const hasPaid = await hasRentBeenPaid(context.tenantId, period, context.rentAmount);
+  if (hasPaid) return actions;
+
+  // Check if we already issued an eviction warning for this period
+  const existingWarning = await prisma.notice.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      type: "EVICTION_WARNING",
+      createdAt: {
+        gte: new Date(now.getFullYear(), now.getMonth(), 1),
+      },
+    },
+  });
+
+  if (existingWarning) return actions;
+
+  actions.push({
+    type: "MATERIAL_BREACH",
+    tenantId: context.tenantId,
+    leaseId: context.leaseId,
+    propertyId: context.propertyId,
+    description: `Material breach: rent of $${context.rentAmount.toFixed(2)} unpaid by the ${context.materialBreachDay}${getOrdinal(context.materialBreachDay)}. Issuing eviction warning.`,
+    context,
+    period,
+  });
+
+  return actions;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function hasRentBeenPaid(tenantId: string, period: string, rentAmount: number): Promise<boolean> {
@@ -329,6 +398,44 @@ A late fee of $${context.lateFeeAmount.toFixed(2)} has been applied to your acco
 Please remit payment of $${(context.rentAmount + context.lateFeeAmount).toFixed(2)} (rent + late fee) immediately to avoid further action.
 
 Failure to pay within 10 days may result in a formal lease violation notice and potential eviction proceedings.
+
+Sincerely,
+Property Management`;
+}
+
+/**
+ * Generate the content for an eviction warning notice (material breach).
+ * References NC General Statutes Chapter 42.
+ */
+export function generateEvictionWarningContent(context: EnforcementContext, period: string): string {
+  const [year, month] = period.split("-");
+  const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString("en-US", { month: "long" });
+  const totalOwed = context.rentAmount + context.lateFeeAmount;
+
+  return `NOTICE OF MATERIAL BREACH AND EVICTION WARNING
+
+To: ${context.tenantName}
+Property: ${context.propertyAddress}
+Date: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+
+Dear ${context.tenantName},
+
+NOTICE IS HEREBY GIVEN that you are in material breach of your lease agreement due to non-payment of rent for ${monthName} ${year}.
+
+OUTSTANDING BALANCE: $${totalOwed.toFixed(2)}
+- Rent Due: $${context.rentAmount.toFixed(2)}
+- Late Fee: $${context.lateFeeAmount.toFixed(2)}
+
+Pursuant to North Carolina General Statutes Chapter 42, Article 3 (G.S. 42-25.6 et seq.), you are hereby notified that failure to pay the full outstanding balance within TEN (10) DAYS of this notice will result in the initiation of summary ejectment proceedings.
+
+YOUR RIGHTS:
+- You have the right to cure this breach by paying the full amount owed within 10 days.
+- You have the right to seek legal counsel.
+- You may contact the North Carolina Bar Association Lawyer Referral Service.
+
+If payment is not received in full by ${new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}, legal proceedings will be initiated.
+
+This notice is being provided in compliance with North Carolina law and does not waive any rights of the landlord under the lease agreement or applicable law.
 
 Sincerely,
 Property Management`;

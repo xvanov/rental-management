@@ -8,6 +8,7 @@ import {
   type EnforcementContext,
   generateLateRentNoticeContent,
   generateViolationNoticeContent,
+  generateEvictionWarningContent,
 } from "@/lib/enforcement/rules-engine";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -42,6 +43,14 @@ export interface EscalationData {
   originalNoticeId?: string;
 }
 
+export interface MaterialBreachData {
+  tenantId: string;
+  leaseId: string;
+  propertyId: string;
+  context: EnforcementContext;
+  period: string;
+}
+
 // ─── Enqueue Jobs ───────────────────────────────────────────────────────────
 
 /**
@@ -74,6 +83,17 @@ export async function enqueueEscalation(data: EscalationData, delay = 0) {
   await queue.add("escalation", data, {
     delay,
     jobId: `escalation-${data.tenantId}-${data.period}`,
+  });
+}
+
+/**
+ * Schedule a material breach / eviction warning action.
+ */
+export async function enqueueMaterialBreach(data: MaterialBreachData, delay = 0) {
+  const queue = getQueue("enforcement");
+  await queue.add("material-breach", data, {
+    delay,
+    jobId: `breach-${data.tenantId}-${data.period}`,
   });
 }
 
@@ -117,6 +137,15 @@ export async function processEnforcementActions(actions: EnforcementAction[]) {
           period: action.period,
         });
         break;
+      case "MATERIAL_BREACH":
+        await enqueueMaterialBreach({
+          tenantId: action.tenantId,
+          leaseId: action.leaseId,
+          propertyId: action.propertyId,
+          context: action.context,
+          period: action.period,
+        });
+        break;
     }
   }
 }
@@ -129,9 +158,9 @@ export function startEnforcementWorker() {
   if (workerStarted) return;
   workerStarted = true;
 
-  createWorker<RentReminderData | LateNoticeData | EscalationData>(
+  createWorker<RentReminderData | LateNoticeData | EscalationData | MaterialBreachData>(
     "enforcement",
-    async (job: Job<RentReminderData | LateNoticeData | EscalationData>) => {
+    async (job: Job<RentReminderData | LateNoticeData | EscalationData | MaterialBreachData>) => {
       switch (job.name) {
         case "rent-reminder":
           await handleRentReminder(job.data as RentReminderData);
@@ -141,6 +170,9 @@ export function startEnforcementWorker() {
           break;
         case "escalation":
           await handleEscalation(job.data as EscalationData);
+          break;
+        case "material-breach":
+          await handleMaterialBreach(job.data as MaterialBreachData);
           break;
       }
     }
@@ -383,6 +415,91 @@ async function handleEscalation(data: EscalationData) {
   });
 
   console.log(`[Enforcement] Escalation: Violation notice created for tenant ${context.tenantName}, period ${period}`);
+}
+
+async function handleMaterialBreach(data: MaterialBreachData) {
+  const { tenantId, propertyId, context, period } = data;
+
+  // Double-check rent is still unpaid
+  const payments = await prisma.ledgerEntry.findMany({
+    where: { tenantId, period, type: "PAYMENT" },
+  });
+  const totalPaid = payments.reduce((sum, p) => sum + Math.abs(p.amount), 0);
+  if (totalPaid >= context.rentAmount) {
+    console.log(`[Enforcement] Rent paid for ${context.tenantName}, skipping material breach`);
+    return;
+  }
+
+  // Generate eviction warning content
+  const content = generateEvictionWarningContent(context, period);
+
+  // Create EVICTION_WARNING notice
+  const notice = await prisma.notice.create({
+    data: {
+      tenantId,
+      type: "EVICTION_WARNING",
+      status: "DRAFT",
+      content,
+    },
+  });
+
+  // Send via SMS
+  if (context.tenantPhone) {
+    try {
+      const smsMessage = `URGENT NOTICE: You are in material breach of your lease due to non-payment of $${context.rentAmount.toFixed(2)}. An eviction warning has been issued. You have 10 days to pay in full. Full notice sent to your email.`;
+      await sendSms({ to: context.tenantPhone, body: smsMessage, tenantId, propertyId });
+    } catch (error) {
+      console.error(`[Enforcement] Failed to send material breach SMS:`, error);
+    }
+  }
+
+  // Send via Email
+  if (context.tenantEmail) {
+    try {
+      await sendEmail({
+        to: context.tenantEmail,
+        subject: "URGENT: Notice of Material Breach and Eviction Warning",
+        text: content,
+        tenantId,
+        propertyId,
+      });
+    } catch (error) {
+      console.error(`[Enforcement] Failed to send material breach email:`, error);
+    }
+  }
+
+  // Update notice status to SENT
+  await prisma.notice.update({
+    where: { id: notice.id },
+    data: { status: "SENT", sentAt: new Date() },
+  });
+
+  // Log events
+  await createEvent({
+    type: "NOTICE",
+    payload: {
+      noticeId: notice.id,
+      noticeType: "EVICTION_WARNING",
+      sentVia: context.tenantPhone ? "SMS" : context.tenantEmail ? "EMAIL" : undefined,
+      content: `Eviction warning issued for material breach (${period})`,
+    },
+    tenantId,
+    propertyId,
+  });
+
+  await createEvent({
+    type: "VIOLATION",
+    payload: {
+      violationType: "MATERIAL_BREACH",
+      description: `Material breach: eviction warning issued for unpaid rent of $${context.rentAmount.toFixed(2)} for ${period}`,
+      deadline: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+      resolved: false,
+    },
+    tenantId,
+    propertyId,
+  });
+
+  console.log(`[Enforcement] Material breach: Eviction warning issued for ${context.tenantName}, period ${period}`);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
