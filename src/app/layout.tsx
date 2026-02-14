@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Rental Ops Platform",
-  description: "AI-assisted rental operations management system",
+  title: "Rentus Homes | Property Management Software",
+  description:
+    "Modern property management software for landlords and property managers. Manage tenants, leases, payments, maintenance, and more — all in one place.",
 };
 
 export default function RootLayout({

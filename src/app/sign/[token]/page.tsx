@@ -46,6 +46,7 @@ export default function SignLeasePage() {
   const [leaseData, setLeaseData] = useState<LeaseData | null>(null);
   const [fullName, setFullName] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [smsConsent, setSmsConsent] = useState(false);
   const [hasSigned, setHasSigned] = useState(false);
   const [signedLeaseId, setSignedLeaseId] = useState<string | null>(null);
 
@@ -153,7 +154,7 @@ export default function SignLeasePage() {
     }
   };
 
-  const canSubmit = fullName.trim() && hasSigned && agreed;
+  const canSubmit = fullName.trim() && hasSigned && agreed && smsConsent;
 
   // Convert markdown to simple HTML for display
   const renderLeaseContent = (content: string) => {
@@ -225,6 +226,12 @@ export default function SignLeasePage() {
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
+          <div className="flex items-center justify-center gap-2.5 mb-3">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <FileText className="size-5" />
+            </div>
+            <span className="text-xl font-bold tracking-tight">Rentus Homes</span>
+          </div>
           <h1 className="text-2xl font-bold">Lease Agreement</h1>
           <p className="text-gray-500 mt-1">
             Please review the lease below and sign at the bottom
@@ -356,7 +363,34 @@ export default function SignLeasePage() {
               </label>
             </div>
 
-            {/* Consent Text */}
+            {/* SMS Consent Checkbox */}
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="smsConsent"
+                  checked={smsConsent}
+                  onChange={(e) => setSmsConsent(e.target.checked)}
+                  className="mt-1"
+                />
+                <label htmlFor="smsConsent" className="text-sm text-gray-800 leading-relaxed">
+                  <strong>SMS/Text Message Consent:</strong> I agree to receive text messages
+                  from Rentus Homes at the phone number on file regarding my rental. These
+                  messages include rent payment reminders, utility billing notifications,
+                  lease updates, maintenance updates, and property notices. Messages are
+                  transactional only — no marketing messages will be sent.
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 ml-7">
+                Message frequency varies. Message and data rates may apply. Reply STOP to
+                opt out at any time. Reply HELP for help. View our{" "}
+                <a href="/privacy" target="_blank" className="text-blue-600 underline">Privacy Policy</a>{" "}
+                and{" "}
+                <a href="/terms" target="_blank" className="text-blue-600 underline">Terms of Service</a>.
+              </p>
+            </div>
+
+            {/* Electronic Signature Consent */}
             <p className="text-xs text-gray-400">
               By signing, you consent to the use of electronic records and signatures.
               Your IP address and timestamp will be recorded as part of the signing record.
