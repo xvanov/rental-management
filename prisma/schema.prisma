@@ -166,10 +166,12 @@ model Tenant {
   firstName     String
   lastName      String
   email         String?
-  phone         String?
-  facebookId    String?
-  unitId        String?
-  active        Boolean   @default(true)
+  phone            String?
+  facebookId       String?
+  unitId           String?
+  active           Boolean   @default(true)
+  smsConsent       Boolean   @default(false)
+  smsConsentDate   DateTime?
   occupantCount Int       @default(1)
   moveInDate    DateTime?
   moveOutDate   DateTime?

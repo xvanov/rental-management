@@ -22,24 +22,54 @@ export interface SendSmsOptions {
   body: string;
   tenantId?: string;
   propertyId?: string;
+  /** Skip sender ID prefix and STOP suffix (e.g. for STOP/HELP auto-replies) */
+  skipCompliance?: boolean;
+}
+
+/**
+ * Wrap an outbound SMS body with sender identification and opt-out language.
+ * Required by TCPA / CTIA / Twilio messaging policy.
+ */
+function wrapComplianceMessage(body: string): string {
+  const prefix = "Rentus Homes: ";
+  const suffix = "\n\nReply STOP to opt out. Reply HELP for help.";
+
+  // Don't double-wrap if already prefixed
+  const prefixed = body.startsWith("Rentus Homes") ? body : `${prefix}${body}`;
+  // Don't double-append if already has STOP language
+  const wrapped = prefixed.includes("Reply STOP") ? prefixed : `${prefixed}${suffix}`;
+  return wrapped;
 }
 
 /**
  * Send an SMS message via Twilio and log it as an immutable event.
  * Creates a Message record in the database and logs a MESSAGE event.
+ * Automatically adds sender ID and STOP/HELP language for compliance.
  */
-export async function sendSms({ to, body, tenantId, propertyId }: SendSmsOptions) {
+export async function sendSms({ to, body, tenantId, propertyId, skipCompliance }: SendSmsOptions) {
   if (!fromNumber) {
     throw new Error("TWILIO_PHONE_NUMBER is required");
   }
 
+  // Check SMS consent if sending to a known tenant
+  if (tenantId) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { smsConsent: true },
+    });
+    if (tenant && !tenant.smsConsent) {
+      throw new Error("Tenant has not opted in to SMS messages");
+    }
+  }
+
   const client = getTwilioClient();
+  const complianceBody = skipCompliance ? body : wrapComplianceMessage(body);
 
   // Send via Twilio
   const twilioMessage = await client.messages.create({
     to,
     from: fromNumber,
-    body,
+    body: complianceBody,
   });
 
   // Create message record in database
@@ -48,7 +78,7 @@ export async function sendSms({ to, body, tenantId, propertyId }: SendSmsOptions
       tenantId: tenantId ?? null,
       channel: "SMS",
       direction: "OUTBOUND",
-      content: body,
+      content: complianceBody,
       metadata: {
         twilioSid: twilioMessage.sid,
         twilioStatus: twilioMessage.status,
@@ -64,7 +94,7 @@ export async function sendSms({ to, body, tenantId, propertyId }: SendSmsOptions
       messageId: message.id,
       channel: "SMS",
       direction: "OUTBOUND",
-      content: body,
+      content: complianceBody,
       to,
     },
     { tenantId, propertyId }
@@ -85,12 +115,13 @@ export interface SendGroupSmsOptions {
  * Logs each individual message as a separate event.
  */
 export async function sendGroupSms({ propertyId, body }: SendGroupSmsOptions) {
-  // Get all active tenants in this property with phone numbers
+  // Get all active tenants in this property with phone numbers who have consented to SMS
   const tenants = await prisma.tenant.findMany({
     where: {
       unit: { propertyId },
       active: true,
       phone: { not: null },
+      smsConsent: true,
     },
     select: {
       id: true,
@@ -154,13 +185,19 @@ export interface IncomingSmsData {
   mediaUrls?: string[];
 }
 
+/** STOP keywords per CTIA guidelines */
+const STOP_KEYWORDS = ["stop", "stopall", "unsubscribe", "cancel", "end", "quit"];
+/** HELP keywords */
+const HELP_KEYWORDS = ["help", "info"];
+
 /**
  * Process an incoming SMS from Twilio webhook.
- * Links the message to a tenant by phone number, creates Message and Event records.
+ * Handles STOP/HELP keywords for compliance, then links the message to a tenant.
  */
 export async function processIncomingSms(data: IncomingSmsData) {
   // Normalize phone number (remove formatting, keep +1 prefix)
   const normalizedPhone = normalizePhone(data.from);
+  const bodyLower = data.body.trim().toLowerCase();
 
   // Look up tenant by phone number
   const tenant = await prisma.tenant.findFirst({
@@ -175,7 +212,105 @@ export async function processIncomingSms(data: IncomingSmsData) {
     },
   });
 
-  // Create message record
+  // Handle STOP keyword — revoke SMS consent
+  if (STOP_KEYWORDS.includes(bodyLower)) {
+    if (tenant) {
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: { smsConsent: false, smsConsentDate: null },
+      });
+    }
+    // Send one final confirmation per TCPA rules
+    if (fromNumber) {
+      const client = getTwilioClient();
+      await client.messages.create({
+        to: data.from,
+        from: fromNumber,
+        body: "Rentus Homes: You have been unsubscribed and will no longer receive text messages. Reply START to re-subscribe.",
+      });
+    }
+    // Still log the message
+    const message = await prisma.message.create({
+      data: {
+        tenantId: tenant?.id ?? null,
+        channel: "SMS",
+        direction: "INBOUND",
+        content: data.body,
+        read: true,
+        metadata: {
+          twilioSid: data.messageSid,
+          from: data.from,
+          to: data.to,
+          keyword: "STOP",
+        },
+      },
+    });
+    return { message, tenant: tenant ? { id: tenant.id, name: `${tenant.firstName} ${tenant.lastName}` } : null, matched: !!tenant, keyword: "STOP" as const };
+  }
+
+  // Handle HELP keyword — send help message
+  if (HELP_KEYWORDS.includes(bodyLower)) {
+    if (fromNumber) {
+      const client = getTwilioClient();
+      await client.messages.create({
+        to: data.from,
+        from: fromNumber,
+        body: "Rentus Homes: For help, contact your property manager or reach us at info@rentus.homes or (213) 293-2712. Reply STOP to opt out.",
+      });
+    }
+    const message = await prisma.message.create({
+      data: {
+        tenantId: tenant?.id ?? null,
+        channel: "SMS",
+        direction: "INBOUND",
+        content: data.body,
+        read: true,
+        metadata: {
+          twilioSid: data.messageSid,
+          from: data.from,
+          to: data.to,
+          keyword: "HELP",
+        },
+      },
+    });
+    return { message, tenant: tenant ? { id: tenant.id, name: `${tenant.firstName} ${tenant.lastName}` } : null, matched: !!tenant, keyword: "HELP" as const };
+  }
+
+  // Handle START keyword — re-subscribe
+  if (bodyLower === "start" || bodyLower === "yes" || bodyLower === "subscribe") {
+    if (tenant) {
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: { smsConsent: true, smsConsentDate: new Date() },
+      });
+    }
+    if (fromNumber) {
+      const client = getTwilioClient();
+      await client.messages.create({
+        to: data.from,
+        from: fromNumber,
+        body: "Rentus Homes: You have been re-subscribed to text messages. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out. Reply HELP for help.",
+      });
+    }
+    const message = await prisma.message.create({
+      data: {
+        tenantId: tenant?.id ?? null,
+        channel: "SMS",
+        direction: "INBOUND",
+        content: data.body,
+        read: true,
+        metadata: {
+          twilioSid: data.messageSid,
+          from: data.from,
+          to: data.to,
+          keyword: "START",
+        },
+      },
+    });
+    return { message, tenant: tenant ? { id: tenant.id, name: `${tenant.firstName} ${tenant.lastName}` } : null, matched: !!tenant, keyword: "START" as const };
+  }
+
+  // Regular message — create record and log event
   const message = await prisma.message.create({
     data: {
       tenantId: tenant?.id ?? null,

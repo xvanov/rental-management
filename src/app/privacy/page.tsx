@@ -100,18 +100,21 @@ export default function PrivacyPolicy() {
               <h2>4. SMS/Text Messaging</h2>
               <p>
                 Our Service enables property managers and landlords to send SMS/text
-                messages to tenants for property management purposes. By signing a
-                lease through Rentus Homes, tenants consent to receive text messages
-                at the phone number provided during lease setup.
+                messages to tenants for property management purposes. Receiving text
+                messages is entirely optional and is not required to use our Service
+                or to complete a lease agreement.
               </p>
               <p className="mt-3">
-                <strong className="text-foreground">What You Consent To:</strong> By
-                signing your lease through Rentus Homes, you agree to receive text
-                messages from Rentus Homes related to your rental, including: rent
-                payment reminders, utility billing notifications, lease signing
-                requests and updates, maintenance updates, property notices, and
-                move-in/move-out communications. All messages are transactional — no
-                marketing messages are sent.
+                <strong className="text-foreground">How You Opt In:</strong> During the
+                lease setup process, tenants are presented with a separate, optional
+                checkbox to consent to receiving text messages. This checkbox is
+                unchecked by default. By checking the box, you voluntarily agree to
+                receive text messages from Rentus Homes related to your rental,
+                including: rent payment reminders, utility billing notifications,
+                maintenance updates, property notices, and move-in/move-out
+                communications. All messages are transactional — no marketing
+                messages are sent. You may complete your lease and use the Service
+                without opting in to text messages.
               </p>
               <p className="mt-3">
                 <strong className="text-foreground">Opt-Out:</strong> You may opt out of

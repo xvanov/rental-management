@@ -148,13 +148,17 @@ export default function TermsOfService() {
               <h2>6. Tenant SMS Consent & Opt-In</h2>
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 space-y-4">
                 <p className="text-foreground font-medium">
-                  By signing a lease through Rentus Homes, tenants agree to receive
-                  SMS/text messages from Rentus Homes at the phone number provided
-                  during lease setup. These messages are transactional and related to
-                  property management only — no marketing messages are sent.
+                  Receiving SMS/text messages from Rentus Homes is entirely optional
+                  and is not a condition of service or of signing a lease. During the
+                  lease setup process, tenants are presented with a separate, optional
+                  checkbox (unchecked by default) to voluntarily consent to receiving
+                  text messages at the phone number they provide. You may decline SMS
+                  and still fully use the Service. These messages are transactional
+                  and related to property management only — no marketing messages are
+                  sent.
                 </p>
                 <div>
-                  <p className="text-foreground font-medium mb-2">Types of messages you may receive:</p>
+                  <p className="text-foreground font-medium mb-2">If you opt in, types of messages you may receive:</p>
                   <ul className="mt-1">
                     <li>Rent payment reminders and confirmations</li>
                     <li>Utility billing notifications</li>

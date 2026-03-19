@@ -68,8 +68,9 @@ export async function POST(request: NextRequest) {
       mediaUrls,
     });
 
+    const keywordInfo = "keyword" in result && result.keyword ? ` [${result.keyword}]` : "";
     console.log(
-      `[Twilio Webhook] SMS from ${from}: "${body.substring(0, 50)}..." → ` +
+      `[Twilio Webhook] SMS from ${from}: "${body.substring(0, 50)}..."${keywordInfo} → ` +
         (result.matched
           ? `matched tenant: ${result.tenant?.name}`
           : "no tenant match")

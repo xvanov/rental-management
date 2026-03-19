@@ -136,9 +136,9 @@ export async function sendPropertyUtilityNotifications(
     return null;
   }
 
-  // Get all tenant phone numbers in parallel
+  // Get all tenant phone numbers (only SMS-consented tenants)
   const tenantPhones = await prisma.tenant.findMany({
-    where: { id: { in: summary.tenantShares.map((s) => s.tenantId) } },
+    where: { id: { in: summary.tenantShares.map((s) => s.tenantId) }, smsConsent: true },
     select: { id: true, phone: true },
   });
   const phoneMap = new Map(tenantPhones.map((t) => [t.id, t.phone]));

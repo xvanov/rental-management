@@ -11,7 +11,7 @@ export async function POST(
   try {
     const { token } = await params;
     const body = await request.json();
-    const { signatureDataUrl, fullName } = body;
+    const { signatureDataUrl, fullName, smsConsent } = body;
 
     if (!signatureDataUrl || !fullName) {
       return NextResponse.json(
@@ -104,6 +104,17 @@ export async function POST(
         signedDocumentUrl: signedDocumentPath,
       },
     });
+
+    // Update tenant SMS consent if opted in
+    if (smsConsent) {
+      await prisma.tenant.update({
+        where: { id: signingToken.lease.tenantId },
+        data: {
+          smsConsent: true,
+          smsConsentDate: new Date(),
+        },
+      });
+    }
 
     // Log event
     await createEvent({

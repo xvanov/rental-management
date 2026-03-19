@@ -136,6 +136,7 @@ export default function SignLeasePage() {
         body: JSON.stringify({
           signatureDataUrl,
           fullName: fullName.trim(),
+          smsConsent,
         }),
       });
 
@@ -154,7 +155,7 @@ export default function SignLeasePage() {
     }
   };
 
-  const canSubmit = fullName.trim() && hasSigned && agreed && smsConsent;
+  const canSubmit = fullName.trim() && hasSigned && agreed;
 
   // Convert markdown to simple HTML for display
   const renderLeaseContent = (content: string) => {
@@ -374,7 +375,7 @@ export default function SignLeasePage() {
                   className="mt-1"
                 />
                 <label htmlFor="smsConsent" className="text-sm text-gray-800 leading-relaxed">
-                  <strong>SMS/Text Message Consent:</strong> I agree to receive text messages
+                  <strong>SMS/Text Message Consent (Optional):</strong> I agree to receive text messages
                   from Rentus Homes at the phone number on file regarding my rental. These
                   messages include rent payment reminders, utility billing notifications,
                   lease updates, maintenance updates, and property notices. Messages are
