@@ -38,11 +38,14 @@ export async function POST(request: NextRequest) {
     // Validate Twilio signature in production
     if (process.env.NODE_ENV === "production" && process.env.TWILIO_AUTH_TOKEN) {
       const signature = request.headers.get("x-twilio-signature") ?? "";
-      const url = request.url;
+      // Always use the public-facing URL for validation (container sees internal IP, not the domain Twilio signed against)
+      const url = process.env.NEXT_PUBLIC_APP_URL
+        ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/api/webhooks/twilio`
+        : request.url;
 
       const isValid = validateTwilioSignature(url, params, signature);
       if (!isValid) {
-        console.error("Invalid Twilio signature");
+        console.error(`[Twilio Webhook] Invalid signature. URL used: ${url}`);
         return NextResponse.json(
           { error: "Invalid signature" },
           { status: 403 }
