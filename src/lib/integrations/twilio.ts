@@ -1,6 +1,7 @@
 import twilio from "twilio";
 import { prisma } from "@/lib/db";
 import { logMessageEvent } from "@/lib/events";
+import { saveMediaFromUrl } from "@/lib/media-storage";
 
 // ─── Twilio Client ───────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ export interface SendSmsOptions {
   propertyId?: string;
   /** Skip sender ID prefix and STOP suffix (e.g. for STOP/HELP auto-replies) */
   skipCompliance?: boolean;
+  /** Public URLs for MMS media attachments (images/videos) */
+  mediaUrls?: string[];
 }
 
 /**
@@ -46,7 +49,7 @@ function wrapComplianceMessage(body: string): string {
  * Creates a Message record in the database and logs a MESSAGE event.
  * Automatically adds sender ID and STOP/HELP language for compliance.
  */
-export async function sendSms({ to, body, tenantId, propertyId, skipCompliance }: SendSmsOptions) {
+export async function sendSms({ to, body, tenantId, propertyId, skipCompliance, mediaUrls }: SendSmsOptions) {
   if (!fromNumber) {
     throw new Error("TWILIO_PHONE_NUMBER is required");
   }
@@ -65,11 +68,12 @@ export async function sendSms({ to, body, tenantId, propertyId, skipCompliance }
   const client = getTwilioClient();
   const complianceBody = skipCompliance ? body : wrapComplianceMessage(body);
 
-  // Send via Twilio
+  // Send via Twilio (with MMS media if provided)
   const twilioMessage = await client.messages.create({
     to,
     from: fromNumber,
     body: complianceBody,
+    ...(mediaUrls && mediaUrls.length > 0 ? { mediaUrl: mediaUrls } : {}),
   });
 
   // Create message record in database
@@ -327,6 +331,27 @@ export async function processIncomingSms(data: IncomingSmsData) {
       },
     },
   });
+
+  // Download and store media attachments from Twilio
+  if (data.mediaUrls && data.mediaUrls.length > 0 && accountSid && authToken) {
+    const authHeader = `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+    for (const mediaUrl of data.mediaUrls) {
+      try {
+        const saved = await saveMediaFromUrl(mediaUrl, message.id, { authHeader });
+        await prisma.messageMedia.create({
+          data: {
+            messageId: message.id,
+            fileName: saved.fileName,
+            filePath: saved.filePath,
+            mimeType: saved.mimeType,
+            sizeBytes: saved.sizeBytes,
+          },
+        });
+      } catch (err) {
+        console.error(`[Twilio] Failed to download media from ${mediaUrl}:`, err);
+      }
+    }
+  }
 
   // Log as immutable event
   await logMessageEvent(

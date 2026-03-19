@@ -424,10 +424,25 @@ model Message {
   createdAt DateTime         @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
+  media  MessageMedia[]
 
   @@index([tenantId])
   @@index([channel])
   @@index([createdAt])
+}
+
+model MessageMedia {
+  id        String   @id @default(cuid())
+  messageId String?
+  fileName  String
+  filePath  String
+  mimeType  String
+  sizeBytes Int?
+  createdAt DateTime @default(now())
+
+  message Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
 }
 
 // ─── Notice ────────────────────────────────────────────────────────────────

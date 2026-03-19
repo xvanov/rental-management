@@ -13,6 +13,9 @@ import {
   Check,
   X,
   Tag,
+  Paperclip,
+  Image,
+  Film,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,13 @@ interface Conversation {
   totalMessages: number;
 }
 
+interface MediaAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+}
+
 interface Message {
   id: string;
   tenantId: string;
@@ -56,6 +66,7 @@ interface Message {
   content: string;
   read: boolean;
   createdAt: string;
+  media?: MediaAttachment[];
   tenant: {
     id: string;
     firstName: string;
@@ -63,6 +74,13 @@ interface Message {
     phone: string | null;
     email: string | null;
   } | null;
+}
+
+interface PendingUpload {
+  mediaId: string;
+  fileName: string;
+  mimeType: string;
+  previewUrl: string;
 }
 
 interface Classification {
@@ -135,6 +153,9 @@ export default function InboxPage() {
   const [showDraftApproval, setShowDraftApproval] = useState(false);
   const [classification, setClassification] = useState<Classification | null>(null);
   const [classifying, setClassifying] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = useCallback(async () => {
@@ -192,7 +213,7 @@ export default function InboxPage() {
   }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedTenantId) return;
+    if ((!newMessage.trim() && pendingUploads.length === 0) || !selectedTenantId) return;
 
     setSending(true);
     try {
@@ -202,12 +223,14 @@ export default function InboxPage() {
         body: JSON.stringify({
           tenantId: selectedTenantId,
           channel: selectedChannel,
-          content: newMessage.trim(),
+          content: newMessage.trim() || (pendingUploads.length > 0 ? "[Media]" : ""),
+          mediaIds: pendingUploads.map((u) => u.mediaId),
         }),
       });
 
       if (res.ok) {
         setNewMessage("");
+        setPendingUploads([]);
         setShowDraftApproval(false);
         setAiDraft("");
         fetchMessages(selectedTenantId);
@@ -217,6 +240,45 @@ export default function InboxPage() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    for (const file of Array.from(files)) {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/media/upload", { method: "POST", body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          setPendingUploads((prev) => [
+            ...prev,
+            {
+              mediaId: data.mediaId,
+              fileName: data.fileName,
+              mimeType: data.mimeType,
+              previewUrl: URL.createObjectURL(file),
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error("Failed to upload file:", error);
+      }
+    }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeUpload = (mediaId: string) => {
+    setPendingUploads((prev) => {
+      const item = prev.find((u) => u.mediaId === mediaId);
+      if (item) URL.revokeObjectURL(item.previewUrl);
+      return prev.filter((u) => u.mediaId !== mediaId);
+    });
   };
 
   const handleSuggestReply = async () => {
@@ -507,6 +569,33 @@ export default function InboxPage() {
                             </span>
                           </div>
                           <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                          {msg.media && msg.media.length > 0 && (
+                            <div className="mt-2 space-y-2">
+                              {msg.media.map((m) =>
+                                m.mimeType.startsWith("image/") ? (
+                                  <img
+                                    key={m.id}
+                                    src={`/api/media/${m.id}`}
+                                    alt={m.fileName}
+                                    className="max-w-full rounded-md max-h-64 cursor-pointer"
+                                    onClick={() => window.open(`/api/media/${m.id}`, "_blank")}
+                                  />
+                                ) : m.mimeType.startsWith("video/") ? (
+                                  <video
+                                    key={m.id}
+                                    src={`/api/media/${m.id}`}
+                                    controls
+                                    className="max-w-full rounded-md max-h-64"
+                                  />
+                                ) : (
+                                  <div key={m.id} className="flex items-center gap-2 text-xs opacity-70">
+                                    <Film className="size-3" />
+                                    <span>{m.fileName}</span>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
                         </Card>
                       </div>
                     ))}
@@ -555,6 +644,32 @@ export default function InboxPage() {
 
               {/* Compose Area */}
               <div className="border-t p-3">
+                {/* Pending upload previews */}
+                {pendingUploads.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {pendingUploads.map((upload) => (
+                      <div key={upload.mediaId} className="relative group">
+                        {upload.mimeType.startsWith("image/") ? (
+                          <img
+                            src={upload.previewUrl}
+                            alt={upload.fileName}
+                            className="h-16 w-16 rounded-md object-cover border"
+                          />
+                        ) : (
+                          <div className="flex h-16 w-16 items-center justify-center rounded-md border bg-muted">
+                            <Film className="size-6 text-muted-foreground" />
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeUpload(upload.mediaId)}
+                          className="absolute -right-1 -top-1 rounded-full bg-destructive p-0.5 text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
                   <Select
                     value={selectedChannel}
@@ -596,6 +711,27 @@ export default function InboxPage() {
                       }}
                     />
                   </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/mp4,video/quicktime"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    title="Attach photo or video"
+                  >
+                    {uploading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Paperclip className="size-4" />
+                    )}
+                  </Button>
                   <Button
                     variant="outline"
                     size="icon"
@@ -612,7 +748,7 @@ export default function InboxPage() {
                   <Button
                     size="icon"
                     onClick={handleSendMessage}
-                    disabled={!newMessage.trim() || sending}
+                    disabled={(!newMessage.trim() && pendingUploads.length === 0) || sending}
                   >
                     <Send className="size-4" />
                   </Button>

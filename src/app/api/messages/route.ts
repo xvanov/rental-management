@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
           tenant: {
             select: { id: true, firstName: true, lastName: true, phone: true, email: true },
           },
+          media: {
+            select: { id: true, fileName: true, mimeType: true, sizeBytes: true },
+          },
         },
       });
 
@@ -117,7 +120,7 @@ export async function POST(request: NextRequest) {
     if (ctx instanceof NextResponse) return ctx;
 
     const body = await request.json();
-    const { tenantId, channel, content } = body;
+    const { tenantId, channel, content, mediaIds } = body;
 
     if (!tenantId || !channel || !content) {
       return NextResponse.json(
@@ -149,6 +152,16 @@ export async function POST(request: NextRequest) {
     // Implement channel switching rule: if phone is available, default to SMS
     const effectiveChannel = tenant.phone && channel !== "EMAIL" ? "SMS" : channel;
 
+    // Build public media URLs for outbound MMS
+    let outboundMediaUrls: string[] | undefined;
+    if (mediaIds && mediaIds.length > 0) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const secret = process.env.MEDIA_SERVE_SECRET;
+      outboundMediaUrls = (mediaIds as string[]).map(
+        (id: string) => `${appUrl}/api/media/${id}${secret ? `?token=${secret}` : ""}`
+      );
+    }
+
     // If SMS channel and Twilio is configured, send via Twilio
     if (effectiveChannel === "SMS" && tenant.phone && process.env.TWILIO_ACCOUNT_SID) {
       const result = await sendSms({
@@ -156,7 +169,16 @@ export async function POST(request: NextRequest) {
         body: content,
         tenantId,
         propertyId: tenant.unit?.propertyId,
+        mediaUrls: outboundMediaUrls,
       });
+
+      // Link uploaded media to this message
+      if (mediaIds && mediaIds.length > 0) {
+        await prisma.messageMedia.updateMany({
+          where: { id: { in: mediaIds } },
+          data: { messageId: result.message.id },
+        });
+      }
 
       // Fetch the message with tenant info for response
       const messageWithTenant = await prisma.message.findUnique({
@@ -164,6 +186,9 @@ export async function POST(request: NextRequest) {
         include: {
           tenant: {
             select: { id: true, firstName: true, lastName: true, phone: true, email: true },
+          },
+          media: {
+            select: { id: true, fileName: true, mimeType: true, sizeBytes: true },
           },
         },
       });
