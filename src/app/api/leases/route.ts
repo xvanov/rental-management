@@ -232,6 +232,38 @@ export async function PATCH(request: NextRequest) {
         tenantId: lease.tenantId,
         propertyId: lease.unit.propertyId,
       });
+
+      // Auto move-out tenant when lease expires or is terminated
+      if (status === "EXPIRED" || status === "TERMINATED") {
+        const moveOutReason = status === "TERMINATED" ? "evicted" : "lease_ended";
+        const moveOutDate = lease.endDate ?? new Date();
+
+        await prisma.tenant.update({
+          where: { id: lease.tenantId },
+          data: {
+            active: false,
+            moveOutDate,
+            moveOutReason,
+          },
+        });
+
+        // Set unit to vacant
+        await prisma.unit.update({
+          where: { id: lease.unitId },
+          data: { status: "VACANT" },
+        });
+
+        await createEvent({
+          type: "SYSTEM",
+          payload: {
+            action: "TENANT_MOVED_OUT",
+            description: `${lease.tenant.firstName} ${lease.tenant.lastName} moved out (${moveOutReason})`,
+            metadata: { tenantId: lease.tenantId, leaseId: lease.id, reason: moveOutReason },
+          },
+          tenantId: lease.tenantId,
+          propertyId: lease.unit.propertyId,
+        });
+      }
     }
 
     return NextResponse.json(lease);
