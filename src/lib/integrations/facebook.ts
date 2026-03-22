@@ -160,6 +160,62 @@ export async function createListingPost({
   return { postId, message };
 }
 
+// ─── Update Existing Post ────────────────────────────────────────────────────
+
+/**
+ * Update an existing Facebook page post's message text.
+ * Photos cannot be changed after posting — only the text content.
+ */
+export async function updateFacebookPost({
+  postId,
+  title,
+  description,
+  price,
+  location,
+}: {
+  postId: string;
+  title: string;
+  description: string;
+  price: number;
+  location?: { city?: string; state?: string };
+}): Promise<void> {
+  if (!pageAccessToken) {
+    throw new Error("FACEBOOK_PAGE_ACCESS_TOKEN is required");
+  }
+
+  const isDryRun = process.env.FACEBOOK_DRY_RUN === "true";
+  if (isDryRun) return;
+
+  const locationStr = location
+    ? `${location.city ?? ""}${location.city && location.state ? ", " : ""}${location.state ?? ""}`
+    : "";
+  const message = [
+    `🏠 ${title}`,
+    `💰 $${price}/month`,
+    locationStr ? `📍 ${locationStr}` : null,
+    "",
+    description,
+    "",
+    "💬 Message us for more info or to schedule a showing!",
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+
+  const res = await fetch(`${graphApiBase}/${postId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      access_token: pageAccessToken,
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(`Failed to update Facebook post: ${data.error?.message ?? res.statusText}`);
+  }
+}
+
 // ─── Send Message via Messenger ─────────────────────────────────────────────
 
 export interface SendFacebookMessageOptions {

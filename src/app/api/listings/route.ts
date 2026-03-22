@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthContext, orgScope } from "@/lib/auth-context";
 import { logSystemEvent } from "@/lib/events";
-import { deleteFacebookPost, deleteFacebookCampaign } from "@/lib/integrations/facebook";
+import { deleteFacebookPost, deleteFacebookCampaign, updateFacebookPost } from "@/lib/integrations/facebook";
 
 export async function GET(request: NextRequest) {
   try {
@@ -173,10 +173,39 @@ export async function PATCH(request: NextRequest) {
     const listing = await prisma.listing.update({
       where: { id },
       data,
+      include: {
+        property: { select: { city: true, state: true } },
+      },
     });
 
+    // Propagate text changes to Facebook if the listing is posted
+    if (listing.facebookPostId && listing.status === "POSTED") {
+      const textChanged = "title" in data || "description" in data || "price" in data;
+      if (textChanged) {
+        try {
+          await updateFacebookPost({
+            postId: listing.facebookPostId,
+            title: listing.title,
+            description: listing.description,
+            price: listing.price,
+            location: {
+              city: listing.property.city,
+              state: listing.property.state,
+            },
+          });
+        } catch (err) {
+          console.error("Failed to update Facebook post:", err);
+          // Don't fail the request — DB update succeeded
+        }
+      }
+    }
+
     await logSystemEvent(
-      { action: "LISTING_UPDATED", description: `Updated listing: ${listing.title}`, metadata: { listingId: id, fields: Object.keys(data) } },
+      {
+        action: "LISTING_UPDATED",
+        description: `Updated listing: ${listing.title}${listing.facebookPostId && listing.status === "POSTED" ? " (FB post updated)" : ""}`,
+        metadata: { listingId: id, fields: Object.keys(data) },
+      },
       { propertyId: listing.propertyId }
     );
 
