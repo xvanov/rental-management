@@ -126,6 +126,9 @@ export const orgScope = {
     property: { organizationId: orgId },
   }),
 
+  /** Listing: { organizationId } (direct) */
+  listing: (orgId: string) => ({ organizationId: orgId }),
+
   /** LeaseTemplate: { organizationId } (direct) */
   leaseTemplate: (orgId: string) => ({ organizationId: orgId }),
 

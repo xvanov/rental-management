@@ -18,6 +18,12 @@ export async function GET() {
             },
           },
         },
+        profile: true,
+        _count: {
+          select: {
+            listings: { where: { status: "POSTED" } },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     });

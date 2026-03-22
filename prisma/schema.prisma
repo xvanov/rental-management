@@ -128,10 +128,13 @@ model Property {
   organization    Organization     @relation(fields: [organizationId], references: [id])
   units           Unit[]
   showings        Showing[]
+  listings        Listing[]
+  conversations   FacebookConversation[]
   events          Event[]
   utilityBills    UtilityBill[]
   tasks           Task[]
   airFilterConfig AirFilterConfig?
+  profile         PropertyProfile?
 
   @@index([organizationId])
 }
@@ -155,6 +158,7 @@ model Unit {
   leases               Lease[]
   tenants              Tenant[]
   cleaningAssignments  CleaningAssignment[]
+  listings             Listing[]
 
   @@index([propertyId])
 }
@@ -1014,4 +1018,118 @@ model AirFilter {
   config AirFilterConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   @@index([configId])
+}
+
+// ─── Listing ──────────────────────────────────────────────────────────────
+
+enum ListingStatus {
+  DRAFT
+  POSTED
+  FILLED
+  EXPIRED
+  REMOVED
+}
+
+enum ListingPlatform {
+  FACEBOOK
+  ROOMIES
+  ZILLOW
+  CRAIGSLIST
+  APARTMENTS_COM
+  OTHER
+}
+
+model Listing {
+  id              String        @id @default(cuid())
+  propertyId      String
+  organizationId  String
+  unitId          String?
+  title           String
+  description     String
+  price           Float
+  photos          Json?
+  facebookPostId  String?
+  status          ListingStatus @default(DRAFT)
+  metadata        Json?
+  platforms       Json?
+  platform        String        @default("FACEBOOK")
+  adCampaignId    String?
+  adBudget        Float?
+  adDurationDays  Int?
+  bedrooms        Int?
+  bathrooms       Float?
+  availableDate   DateTime?
+  postedAt        DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  property      Property               @relation(fields: [propertyId], references: [id])
+  unit          Unit?                  @relation(fields: [unitId], references: [id])
+  conversations FacebookConversation[]
+
+  @@index([propertyId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([unitId])
+}
+
+// ─── Property Profile ─────────────────────────────────────────────────────
+
+model PropertyProfile {
+  id             String   @id @default(cuid())
+  propertyId     String   @unique
+  description    String?
+  photos         Json?
+  amenities      Json?
+  petPolicy      String?
+  petDeposit     Float?
+  smokingAllowed Boolean  @default(false)
+  maxOccupants   Int?
+  parkingSpaces  Int?
+  laundry        String?
+  customRules    Json?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id])
+}
+
+// ─── Facebook Conversation ────────────────────────────────────────────────
+
+enum ConversationStage {
+  INITIAL_INQUIRY
+  ANSWERING_QUESTIONS
+  PROPOSING_TIMES
+  AWAITING_SELECTION
+  CONFIRMING_BOOKING
+  SHOWING_BOOKED
+  DECLINED
+  STALE
+}
+
+model FacebookConversation {
+  id             String            @id @default(cuid())
+  senderPsid     String
+  listingId      String?
+  propertyId     String
+  stage          ConversationStage @default(INITIAL_INQUIRY)
+  prospectName   String?
+  prospectPhone  String?
+  prospectEmail  String?
+  showingId      String?
+  proposedSlots  Json?
+  messageCount   Int               @default(0)
+  lastMessageAt  DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  listing  Listing?  @relation(fields: [listingId], references: [id])
+  property Property  @relation(fields: [propertyId], references: [id])
+
+  @@unique([senderPsid, propertyId])
+  @@index([senderPsid])
+  @@index([stage])
+  @@index([lastMessageAt])
 }

@@ -4,15 +4,15 @@ import {
   validateWebhookSignature,
   parseWebhookPayload,
   processIncomingFacebookMessage,
-  sendAutoResponse,
-  handleChannelSwitch,
+  sendFacebookMessage,
+  detectPhoneNumber,
 } from "@/lib/integrations/facebook";
+import { handleConversationMessage } from "@/lib/facebook-conversation";
+import { prisma } from "@/lib/db";
 
 /**
  * GET /api/webhooks/facebook
  * Facebook Webhook Verification endpoint.
- * Facebook sends a GET request with hub.mode, hub.verify_token, and hub.challenge
- * to verify the webhook subscription.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -23,7 +23,6 @@ export async function GET(request: NextRequest) {
   const result = verifyWebhook(mode, token, challenge);
 
   if (result.valid && result.challenge) {
-    // Must return the challenge as plain text with 200
     return new NextResponse(result.challenge, {
       status: 200,
       headers: { "Content-Type": "text/plain" },
@@ -35,9 +34,8 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/webhooks/facebook
- * Handles incoming Messenger webhook events from Facebook.
- * Processes messages, detects phone numbers for channel switching,
- * and sends auto-responses for initial inquiries.
+ * Handles incoming Messenger webhook events.
+ * Routes messages through the conversation AI engine.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -54,32 +52,54 @@ export async function POST(request: NextRequest) {
     }
 
     const body = JSON.parse(bodyText);
-
-    // Parse webhook payload to extract messages
     const messages = parseWebhookPayload(body);
 
     if (messages.length === 0) {
-      // Acknowledge non-message events (delivery receipts, read receipts, etc.)
       return NextResponse.json({ status: "ok" });
     }
 
-    // Process each incoming message
     const results = [];
     for (const msg of messages) {
-      // Process and store the message
+      // 1. Store the incoming message
       const result = await processIncomingFacebookMessage(msg);
       results.push(result);
 
-      // If a phone number was detected, handle channel switch
-      if (result.phoneDetection.detected && result.phoneDetection.phone) {
-        await handleChannelSwitch(
+      // 2. If phone detected, store on conversation record (but stay on Messenger)
+      const phoneDetection = detectPhoneNumber(msg.text);
+      if (phoneDetection.detected && phoneDetection.phone) {
+        await prisma.facebookConversation.updateMany({
+          where: { senderPsid: msg.senderId },
+          data: { prospectPhone: phoneDetection.phone },
+        });
+      }
+
+      // 3. Run conversation AI engine
+      try {
+        const responseText = await handleConversationMessage(
           msg.senderId,
-          result.phoneDetection.phone,
-          result.tenant?.id
+          msg.text,
+          msg.messageId
         );
-      } else {
-        // Send auto-response for initial inquiries (only if no phone detected)
-        await sendAutoResponse(msg.senderId, msg.text);
+
+        // 4. Send response via Messenger
+        await sendFacebookMessage({
+          recipientId: msg.senderId,
+          text: responseText,
+          tenantId: result.tenant?.id,
+          propertyId: result.tenant ? undefined : undefined,
+        });
+      } catch (err) {
+        console.error("Conversation engine error:", err);
+        // Send a graceful fallback (best-effort)
+        try {
+          await sendFacebookMessage({
+            recipientId: msg.senderId,
+            text: "Thanks for your message! A team member will follow up with you shortly.",
+          });
+        } catch {
+          // Can't send fallback either — just log
+          console.error("Failed to send fallback message to", msg.senderId);
+        }
       }
     }
 
@@ -90,7 +110,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Facebook webhook error:", error);
-    // Always return 200 to prevent Facebook retries
     return NextResponse.json({ status: "ok", error: "Processing error" });
   }
 }

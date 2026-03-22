@@ -2,7 +2,7 @@ import { google, calendar_v3 } from "googleapis";
 
 // ─── Google Calendar Client ──────────────────────────────────────────────────
 
-const SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"];
+const SCOPES = ["https://www.googleapis.com/auth/calendar.events"];
 
 function getCalendarClient(): calendar_v3.Calendar {
   const credentials = process.env.GOOGLE_CALENDAR_CREDENTIALS;
@@ -134,6 +134,61 @@ export async function getAvailableSlots(
   }
 
   return slots;
+}
+
+// ─── Create Calendar Event ──────────────────────────────────────────────────
+
+export interface CreateCalendarEventOptions {
+  summary: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  attendeeEmail?: string;
+  location?: string;
+}
+
+/**
+ * Create a new event on Google Calendar.
+ * Returns the event ID and HTML link.
+ */
+export async function createCalendarEvent(
+  options: CreateCalendarEventOptions
+): Promise<{ eventId: string; htmlLink: string }> {
+  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  if (!calendarId) {
+    throw new Error("GOOGLE_CALENDAR_ID is required");
+  }
+
+  const calendar = getCalendarClient();
+
+  const event: calendar_v3.Schema$Event = {
+    summary: options.summary,
+    description: options.description,
+    start: {
+      dateTime: options.startTime.toISOString(),
+    },
+    end: {
+      dateTime: options.endTime.toISOString(),
+    },
+  };
+
+  if (options.location) {
+    event.location = options.location;
+  }
+
+  if (options.attendeeEmail) {
+    event.attendees = [{ email: options.attendeeEmail }];
+  }
+
+  const response = await calendar.events.insert({
+    calendarId,
+    requestBody: event,
+  });
+
+  return {
+    eventId: response.data.id!,
+    htmlLink: response.data.htmlLink!,
+  };
 }
 
 /**

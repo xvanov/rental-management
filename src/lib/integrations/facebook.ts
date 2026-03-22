@@ -179,29 +179,37 @@ export async function sendFacebookMessage({
   tenantId,
   propertyId,
 }: SendFacebookMessageOptions) {
-  if (!pageAccessToken) {
-    throw new Error("FACEBOOK_PAGE_ACCESS_TOKEN is required");
-  }
+  const isDryRun = process.env.FACEBOOK_DRY_RUN === "true";
+  let responseData: { message_id?: string } = {};
 
-  const response = await fetch(
-    `${graphApiBase}/me/messages`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: { text },
-        access_token: pageAccessToken,
-      }),
+  if (isDryRun) {
+    // In dry-run mode, skip the Graph API call but still store in DB
+    responseData = { message_id: `dry_run_${Date.now()}` };
+  } else {
+    if (!pageAccessToken) {
+      throw new Error("FACEBOOK_PAGE_ACCESS_TOKEN is required");
     }
-  );
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(`Failed to send Facebook message: ${errorData.error?.message ?? response.statusText}`);
+    const response = await fetch(
+      `${graphApiBase}/me/messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          message: { text },
+          access_token: pageAccessToken,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Failed to send Facebook message: ${errorData.error?.message ?? response.statusText}`);
+    }
+
+    responseData = await response.json();
   }
-
-  const responseData = await response.json();
 
   // Create message record in database
   const message = await prisma.message.create({
@@ -530,6 +538,259 @@ export async function validateWebhookSignature(
     .join("");
 
   return computedHash === signatureHash;
+}
+
+// ─── Marketing API: Marketplace Ads ─────────────────────────────────────────
+
+const adAccountId = process.env.FACEBOOK_AD_ACCOUNT_ID;
+
+export interface CreateListingAdOptions {
+  /** The page post ID from createListingPost (format: pageId_postId) */
+  postId: string;
+  /** Display name for the campaign */
+  listingTitle: string;
+  /** City for geo-targeting (15-mile radius minimum for housing) */
+  city: string;
+  /** State for geo-targeting */
+  state: string;
+  /** Daily budget in dollars (minimum $5) */
+  dailyBudgetDollars?: number;
+  /** Number of days to run the ad */
+  durationDays?: number;
+  /** Start paused so you can review before going live */
+  startPaused?: boolean;
+}
+
+export interface ListingAdResult {
+  campaignId: string;
+  adSetId: string;
+  adCreativeId: string;
+  adId: string;
+  dailyBudget: number;
+  durationDays: number;
+  status: string;
+}
+
+/**
+ * Create a Facebook ad campaign that promotes a listing post in Marketplace + Feed.
+ * Compliant with HOUSING special ad category restrictions:
+ * - Age: 18-65+ (fixed)
+ * - Gender: all
+ * - Location: city + 15mi radius minimum
+ * - No interest/behavior targeting
+ */
+export async function createListingAd({
+  postId,
+  listingTitle,
+  city,
+  state,
+  dailyBudgetDollars = 10,
+  durationDays = 7,
+  startPaused = true,
+}: CreateListingAdOptions): Promise<ListingAdResult> {
+  if (!pageAccessToken || !adAccountId) {
+    throw new Error(
+      "FACEBOOK_PAGE_ACCESS_TOKEN and FACEBOOK_AD_ACCOUNT_ID are required"
+    );
+  }
+
+  const campaignStatus = startPaused ? "PAUSED" : "ACTIVE";
+  // Budget is in cents
+  const dailyBudgetCents = Math.round(dailyBudgetDollars * 100);
+
+  // Track created objects for cleanup on partial failure
+  const createdIds: { campaignId?: string; adSetId?: string; creativeId?: string } = {};
+
+  let campaignId: string;
+  let adSetId: string;
+  let adCreativeId: string;
+  let adId: string;
+
+  try {
+    // 1. Create Campaign with HOUSING special ad category
+    const campaignRes = await graphPost(`${adAccountId}/campaigns`, {
+      name: `Listing: ${listingTitle}`,
+      objective: "OUTCOME_AWARENESS",
+      special_ad_categories: JSON.stringify(["HOUSING"]),
+      special_ad_category_country: JSON.stringify(["US"]),
+      status: campaignStatus,
+    });
+    campaignId = campaignRes.id;
+    createdIds.campaignId = campaignId;
+
+    // 2. Create Ad Set with housing-compliant targeting
+    const now = new Date();
+    const endTime = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+    const targeting = {
+      geo_locations: {
+        cities: [
+          {
+            key: await getCityKey(city, state),
+            radius: 15,
+            distance_unit: "mile",
+          },
+        ],
+      },
+      // Housing ads: age must be 18-65+, gender must be all
+      age_min: 18,
+      age_max: 65,
+    };
+
+    const adSetRes = await graphPost(`${adAccountId}/adsets`, {
+      name: `${listingTitle} — ${city} area`,
+      campaign_id: campaignId,
+      daily_budget: dailyBudgetCents.toString(),
+      start_time: now.toISOString(),
+      end_time: endTime.toISOString(),
+      billing_event: "IMPRESSIONS",
+      optimization_goal: "REACH",
+      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      targeting: JSON.stringify(targeting),
+      status: campaignStatus,
+    });
+    adSetId = adSetRes.id;
+    createdIds.adSetId = adSetId;
+
+    // 3. Create Ad Creative using the existing page post
+    const creativeRes = await graphPost(`${adAccountId}/adcreatives`, {
+      name: `Creative: ${listingTitle}`,
+      object_story_id: postId,
+    });
+    adCreativeId = creativeRes.id;
+    createdIds.creativeId = adCreativeId;
+
+    // 4. Create the Ad
+    const adRes = await graphPost(`${adAccountId}/ads`, {
+      name: `Ad: ${listingTitle}`,
+      adset_id: adSetId,
+      creative: JSON.stringify({ creative_id: adCreativeId }),
+      status: campaignStatus,
+    });
+    adId = adRes.id;
+  } catch (err) {
+    // Clean up any partially created objects
+    for (const id of [createdIds.creativeId, createdIds.adSetId, createdIds.campaignId]) {
+      if (id) {
+        try {
+          await fetch(`${graphApiBase}/${id}?access_token=${pageAccessToken}`, { method: "DELETE" });
+        } catch {
+          console.error(`Failed to clean up Facebook object ${id}`);
+        }
+      }
+    }
+    throw err;
+  }
+
+  // Log the ad creation
+  await logSystemEvent({
+    action: "FACEBOOK_AD_CREATED",
+    description: `Created Marketplace ad for "${listingTitle}" — $${dailyBudgetDollars}/day for ${durationDays} days`,
+    metadata: {
+      campaignId,
+      adSetId,
+      adCreativeId,
+      adId,
+      postId,
+      city,
+      state,
+      dailyBudgetDollars,
+      durationDays,
+      status: campaignStatus,
+    },
+  });
+
+  return {
+    campaignId,
+    adSetId,
+    adCreativeId,
+    adId,
+    dailyBudget: dailyBudgetDollars,
+    durationDays,
+    status: campaignStatus,
+  };
+}
+
+/**
+ * Look up a Facebook city targeting key by name and state.
+ * Searches the adgeolocation endpoint and matches by region.
+ */
+async function getCityKey(city: string, state: string): Promise<string> {
+  const query = encodeURIComponent(city);
+  const res = await fetch(
+    `${graphApiBase}/search?type=adgeolocation&location_types=${encodeURIComponent('["city"]')}&q=${query}&country_code=US&access_token=${pageAccessToken}`
+  );
+  const data = await res.json();
+
+  if (!data.data?.length) {
+    throw new Error(`Could not find city "${city}, ${state}" for ad targeting`);
+  }
+
+  // State abbreviation → full name mapping for common states
+  const stateNames: Record<string, string> = {
+    AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+    CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+    HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+    KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+    MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+    MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+    NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+    OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+    SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+    VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+    DC: "District of Columbia",
+  };
+
+  const stateFull = stateNames[state.toUpperCase()] ?? state;
+
+  // Match by state/region
+  const match = data.data.find(
+    (c: { region?: string; country_code?: string }) =>
+      c.country_code === "US" &&
+      c.region?.toLowerCase() === stateFull.toLowerCase()
+  );
+
+  if (match) return match.key;
+
+  // Fallback to first US result
+  const usResult = data.data.find(
+    (c: { country_code?: string }) => c.country_code === "US"
+  );
+  if (usResult) return usResult.key;
+
+  return data.data[0].key;
+}
+
+/**
+ * Helper for Graph API POST requests to the Marketing API.
+ */
+async function graphPost(
+  endpoint: string,
+  params: Record<string, string>
+): Promise<{ id: string }> {
+  const body = new URLSearchParams(params);
+  body.set("access_token", pageAccessToken!);
+
+  const res = await fetch(`${graphApiBase}/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(
+      `Facebook Marketing API error (${endpoint}): ${data.error.message}`
+    );
+  }
+  return data;
+}
+
+/**
+ * Check if Facebook Ads (Marketing API) is configured.
+ */
+export function isAdsConfigured(): boolean {
+  return !!(pageAccessToken && adAccountId);
 }
 
 // ─── Parse Webhook Events ───────────────────────────────────────────────────
