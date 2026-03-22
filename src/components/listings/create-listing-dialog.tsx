@@ -374,80 +374,80 @@ export function CreateListingDialog({
           <div className="grid gap-2">
             <Label>Photos & Videos ({totalMedia})</Label>
 
-            {/* Existing photos */}
-            {existingPhotos.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {existingPhotos.map((url, i) => (
-                  <div key={i} className="relative group">
+            {isEditing && editListing?.photos && editListing.photos.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {editListing.photos.map((url, i) => (
                     <img
+                      key={i}
                       src={url}
                       alt={`Photo ${i + 1}`}
-                      className="size-16 rounded object-cover border"
+                      className="size-16 rounded object-cover border opacity-75"
                     />
-                    <button
-                      type="button"
-                      className="absolute -top-1 -right-1 size-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => removeExistingPhoto(i)}
-                    >
-                      <Trash2 className="size-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* New uploads */}
-            {uploads.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {uploads.map((upload) => (
-                  <div key={upload.mediaId} className="relative group">
-                    {upload.mimeType.startsWith("video/") ? (
-                      <div className="size-16 rounded border bg-muted flex items-center justify-center text-xs">
-                        Video
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Photos cannot be changed after publishing to Facebook. To use different photos, remove this listing and create a new one.
+                </p>
+              </>
+            ) : !isEditing ? (
+              <>
+                {/* New uploads */}
+                {uploads.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {uploads.map((upload) => (
+                      <div key={upload.mediaId} className="relative group">
+                        {upload.mimeType.startsWith("video/") ? (
+                          <div className="size-16 rounded border bg-muted flex items-center justify-center text-xs">
+                            Video
+                          </div>
+                        ) : (
+                          <img
+                            src={upload.previewUrl}
+                            alt={upload.fileName}
+                            className="size-16 rounded object-cover border"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          className="absolute -top-1 -right-1 size-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => removeUpload(upload.mediaId)}
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
                       </div>
-                    ) : (
-                      <img
-                        src={upload.previewUrl}
-                        alt={upload.fileName}
-                        className="size-16 rounded object-cover border"
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className="absolute -top-1 -right-1 size-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => removeUpload(upload.mediaId)}
-                    >
-                      <Trash2 className="size-3" />
-                    </button>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <Loader2 className="mr-1 size-3 animate-spin" />
-                ) : (
-                  <ImagePlus className="mr-1 size-3" />
                 )}
-                {uploading ? "Uploading..." : "Add Photos/Videos"}
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                multiple
-                className="hidden"
-                onChange={handleFileSelect}
-              />
-            </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <Loader2 className="mr-1 size-3 animate-spin" />
+                    ) : (
+                      <ImagePlus className="mr-1 size-3" />
+                    )}
+                    {uploading ? "Uploading..." : "Add Photos/Videos"}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">No photos attached.</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
