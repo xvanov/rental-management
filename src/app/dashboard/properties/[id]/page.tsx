@@ -724,13 +724,24 @@ export default function PropertyDetailPage() {
                               </Button>
                             )}
                             {listing.status === "DRAFT" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setPublishListing(listing)}
-                              >
-                                Publish
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setPublishListing(listing)}
+                                >
+                                  Publish
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() =>
+                                    handleListingAction(listing.id, "REMOVED")
+                                  }
+                                >
+                                  Delete
+                                </Button>
+                              </>
                             )}
                             {listing.status === "POSTED" && (
                               <>
