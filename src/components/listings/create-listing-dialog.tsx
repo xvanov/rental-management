@@ -352,14 +352,16 @@ export function CreateListingDialog({
             <div className="grid gap-2">
               <Label>Unit</Label>
               <Select
-                value={form.unitId}
-                onValueChange={(val) => setForm({ ...form, unitId: val })}
+                value={form.unitId || "__all__"}
+                onValueChange={(val) =>
+                  setForm({ ...form, unitId: val === "__all__" ? "" : val })
+                }
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Entire property" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Entire property</SelectItem>
+                  <SelectItem value="__all__">Entire property</SelectItem>
                   {vacantUnits.map((unit) => (
                     <SelectItem key={unit.id} value={unit.id}>
                       {unit.name}
