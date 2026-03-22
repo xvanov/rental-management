@@ -42,9 +42,11 @@ export function PublishDialog({
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
     new Set()
   );
-  const [adBudget, setAdBudget] = useState("10");
+  const [runAd, setRunAd] = useState(false);
+  const [adBudget, setAdBudget] = useState("5");
   const [adDays, setAdDays] = useState("7");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function togglePlatform(key: string) {
     setSelectedPlatforms((prev) => {
@@ -63,11 +65,12 @@ export function PublishDialog({
     if (selectedPlatforms.size === 0) return;
 
     setLoading(true);
+    setError(null);
     try {
       const body: Record<string, unknown> = {
         platforms: Array.from(selectedPlatforms),
       };
-      if (selectedPlatforms.has("FACEBOOK") && adBudget) {
+      if (selectedPlatforms.has("FACEBOOK") && runAd) {
         body.adOptions = {
           dailyBudget: Number(adBudget),
           days: Number(adDays),
@@ -83,10 +86,11 @@ export function PublishDialog({
         throw new Error(data.error || "Failed to publish listing");
       }
       setSelectedPlatforms(new Set());
+      setRunAd(false);
       onPublished();
       onOpenChange(false);
     } catch (err) {
-      console.error("Failed to publish listing:", err);
+      setError(err instanceof Error ? err.message : "Failed to publish");
     } finally {
       setLoading(false);
     }
@@ -95,6 +99,8 @@ export function PublishDialog({
   const location = listing.property
     ? `${listing.property.city}, ${listing.property.state}`
     : "";
+
+  const totalAdCost = runAd ? Number(adBudget) * Number(adDays) : 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,41 +137,71 @@ export function PublishDialog({
               ))}
             </div>
           </div>
+
           {selectedPlatforms.has("FACEBOOK") && (
             <div className="grid gap-3 rounded-md border p-3">
-              <Label className="text-xs text-muted-foreground">
-                Facebook Ad Options (optional)
-              </Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="ad-budget">Daily Budget ($)</Label>
-                  <Input
-                    id="ad-budget"
-                    type="number"
-                    min={1}
-                    value={adBudget}
-                    onChange={(e) => setAdBudget(e.target.value)}
-                  />
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={runAd}
+                  onChange={() => setRunAd(!runAd)}
+                  className="size-4 rounded border-gray-300"
+                />
+                <span className="text-sm font-medium">
+                  Run a Facebook/Marketplace ad
+                </span>
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {runAd
+                  ? "Your ad will go live immediately targeting the local area."
+                  : "Without an ad, the listing posts to your page only (free)."}
+              </p>
+
+              {runAd && (
+                <div className="grid grid-cols-2 gap-4 mt-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="ad-budget">Daily Budget ($)</Label>
+                    <Input
+                      id="ad-budget"
+                      type="number"
+                      min={5}
+                      value={adBudget}
+                      onChange={(e) => setAdBudget(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="ad-days">Duration (days)</Label>
+                    <Input
+                      id="ad-days"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={adDays}
+                      onChange={(e) => setAdDays(e.target.value)}
+                    />
+                  </div>
+                  <div className="col-span-2 text-sm text-muted-foreground">
+                    Total ad spend: <span className="font-medium text-foreground">${totalAdCost}</span> over {adDays} days
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="ad-days">Days</Label>
-                  <Input
-                    id="ad-days"
-                    type="number"
-                    min={1}
-                    value={adDays}
-                    onChange={(e) => setAdDays(e.target.value)}
-                  />
-                </div>
-              </div>
+              )}
             </div>
           )}
+
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
+
           <DialogFooter>
             <Button
               type="submit"
               disabled={loading || selectedPlatforms.size === 0}
             >
-              {loading ? "Publishing..." : "Publish"}
+              {loading
+                ? "Publishing..."
+                : runAd
+                  ? `Publish + Run Ad ($${totalAdCost})`
+                  : "Publish"}
             </Button>
           </DialogFooter>
         </form>

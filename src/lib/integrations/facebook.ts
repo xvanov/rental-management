@@ -557,7 +557,7 @@ export interface CreateListingAdOptions {
   dailyBudgetDollars?: number;
   /** Number of days to run the ad */
   durationDays?: number;
-  /** Start paused so you can review before going live */
+  /** Start paused for review, or active to go live immediately */
   startPaused?: boolean;
 }
 
@@ -784,6 +784,42 @@ async function graphPost(
     );
   }
   return data;
+}
+
+/**
+ * Delete a Facebook page post by its ID.
+ */
+export async function deleteFacebookPost(postId: string): Promise<void> {
+  if (!pageAccessToken) return;
+  const isDryRun = process.env.FACEBOOK_DRY_RUN === "true";
+  if (isDryRun) return;
+
+  const res = await fetch(
+    `${graphApiBase}/${postId}?access_token=${pageAccessToken}`,
+    { method: "DELETE" }
+  );
+  const data = await res.json();
+  if (data.error) {
+    console.error(`Failed to delete Facebook post ${postId}:`, data.error.message);
+  }
+}
+
+/**
+ * Delete a Facebook ad campaign and all its children (ad sets, ads).
+ */
+export async function deleteFacebookCampaign(campaignId: string): Promise<void> {
+  if (!pageAccessToken) return;
+  const isDryRun = process.env.FACEBOOK_DRY_RUN === "true";
+  if (isDryRun) return;
+
+  const res = await fetch(
+    `${graphApiBase}/${campaignId}?access_token=${pageAccessToken}`,
+    { method: "DELETE" }
+  );
+  const data = await res.json();
+  if (data.error) {
+    console.error(`Failed to delete Facebook campaign ${campaignId}:`, data.error.message);
+  }
 }
 
 /**

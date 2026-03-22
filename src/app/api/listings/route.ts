@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthContext, orgScope } from "@/lib/auth-context";
 import { logSystemEvent } from "@/lib/events";
+import { deleteFacebookPost, deleteFacebookCampaign } from "@/lib/integrations/facebook";
 
 export async function GET(request: NextRequest) {
   try {
@@ -215,13 +216,35 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    // Delete Facebook post if exists
+    if (existing.facebookPostId) {
+      try {
+        await deleteFacebookPost(existing.facebookPostId);
+      } catch (err) {
+        console.error("Failed to delete Facebook post:", err);
+      }
+    }
+
+    // Delete Facebook ad campaign if exists
+    if (existing.adCampaignId) {
+      try {
+        await deleteFacebookCampaign(existing.adCampaignId);
+      } catch (err) {
+        console.error("Failed to delete Facebook campaign:", err);
+      }
+    }
+
     const listing = await prisma.listing.update({
       where: { id },
       data: { status: "REMOVED" },
     });
 
     await logSystemEvent(
-      { action: "LISTING_REMOVED", description: `Removed listing: ${listing.title}`, metadata: { listingId: id } },
+      {
+        action: "LISTING_REMOVED",
+        description: `Removed listing: ${listing.title}${existing.facebookPostId ? " (FB post deleted)" : ""}${existing.adCampaignId ? " (ad campaign deleted)" : ""}`,
+        metadata: { listingId: id, facebookPostId: existing.facebookPostId, adCampaignId: existing.adCampaignId },
+      },
       { propertyId: listing.propertyId }
     );
 

@@ -96,6 +96,10 @@ interface Listing {
     status?: string;
     externalId?: string;
     postedAt?: string;
+    adCampaignId?: string;
+    adStatus?: string;
+    adBudget?: number;
+    adDays?: number;
   }> | null;
   postedAt: string | null;
   bedrooms: number | null;
@@ -103,6 +107,9 @@ interface Listing {
   availableDate: string | null;
   unitId: string | null;
   unit: { name: string } | null;
+  adCampaignId: string | null;
+  adBudget: number | null;
+  adDurationDays: number | null;
   createdAt: string;
 }
 
@@ -651,6 +658,7 @@ export default function PropertyDetailPage() {
                       <TableHead>Price</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Platforms</TableHead>
+                      <TableHead>Ad</TableHead>
                       <TableHead>Posted</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -672,6 +680,20 @@ export default function PropertyDetailPage() {
                         </TableCell>
                         <TableCell>
                           <PlatformBadges platforms={listing.platforms} />
+                        </TableCell>
+                        <TableCell>
+                          {listing.adCampaignId ? (
+                            <div className="text-xs">
+                              <Badge variant="default" className="bg-blue-600">
+                                ${listing.adBudget}/day
+                              </Badge>
+                              <div className="mt-1 text-muted-foreground">
+                                {listing.adDurationDays}d
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           {listing.postedAt

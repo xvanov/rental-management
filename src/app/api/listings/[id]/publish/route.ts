@@ -41,6 +41,8 @@ export async function POST(
     const platformEntries: Array<Record<string, unknown>> = [];
     let facebookPostId: string | undefined;
     let adCampaignId: string | undefined;
+    let adBudget: number | undefined;
+    let adDurationDays: number | undefined;
 
     for (const platform of platforms) {
       if (platform === "FACEBOOK") {
@@ -58,7 +60,7 @@ export async function POST(
 
         facebookPostId = result.postId;
 
-        if (adOptions && isAdsConfigured()) {
+        if (adOptions && adOptions.dailyBudget > 0 && isAdsConfigured()) {
           const adResult = await createListingAd({
             postId: result.postId,
             listingTitle: listing.title,
@@ -66,21 +68,35 @@ export async function POST(
             state: listing.property.state,
             dailyBudgetDollars: adOptions.dailyBudget,
             durationDays: adOptions.days,
+            startPaused: false, // Go live immediately
           });
           adCampaignId = adResult.campaignId;
-        }
+          adBudget = adOptions.dailyBudget;
+          adDurationDays = adOptions.days;
 
-        platformEntries.push({
-          platform: "FACEBOOK",
-          externalId: result.postId,
-          postedAt: new Date(),
-          status: "POSTED",
-        });
+          platformEntries.push({
+            platform: "FACEBOOK",
+            externalId: result.postId,
+            postedAt: new Date().toISOString(),
+            status: "POSTED",
+            adCampaignId: adResult.campaignId,
+            adStatus: "ACTIVE",
+            adBudget: adOptions.dailyBudget,
+            adDays: adOptions.days,
+          });
+        } else {
+          platformEntries.push({
+            platform: "FACEBOOK",
+            externalId: result.postId,
+            postedAt: new Date().toISOString(),
+            status: "POSTED",
+          });
+        }
       } else {
         platformEntries.push({
           platform,
           status: "MANUAL",
-          postedAt: new Date(),
+          postedAt: new Date().toISOString(),
         });
       }
     }
@@ -93,14 +109,20 @@ export async function POST(
         platforms: platformEntries as unknown as import("@/generated/prisma/client").Prisma.InputJsonValue,
         ...(facebookPostId ? { facebookPostId } : {}),
         ...(adCampaignId ? { adCampaignId } : {}),
+        ...(adBudget ? { adBudget } : {}),
+        ...(adDurationDays ? { adDurationDays } : {}),
+      },
+      include: {
+        property: { select: { id: true, address: true, city: true, state: true } },
+        unit: { select: { id: true, name: true } },
       },
     });
 
     await logSystemEvent(
       {
         action: "LISTING_PUBLISHED",
-        description: `Published listing "${listing.title}" to ${platforms.join(", ")}`,
-        metadata: { listingId: id, platforms, facebookPostId, adCampaignId },
+        description: `Published listing "${listing.title}" to ${platforms.join(", ")}${adCampaignId ? ` with $${adBudget}/day ad for ${adDurationDays} days` : ""}`,
+        metadata: { listingId: id, platforms, facebookPostId, adCampaignId, adBudget, adDurationDays },
       },
       { propertyId: listing.propertyId }
     );
