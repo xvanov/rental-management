@@ -33,15 +33,15 @@ export interface SendSmsOptions {
  * Wrap an outbound SMS body with sender identification and opt-out language.
  * Required by TCPA / CTIA / Twilio messaging policy.
  */
-function wrapComplianceMessage(body: string): string {
+function wrapComplianceMessage(body: string, isFirstMessage: boolean = true): string {
   const prefix = "Rentus Homes: ";
   const suffix = "\n\nReply STOP to opt out. Reply HELP for help.";
 
   // Don't double-wrap if already prefixed
   const prefixed = body.startsWith("Rentus Homes") ? body : `${prefix}${body}`;
-  // Don't double-append if already has STOP language
-  const wrapped = prefixed.includes("Reply STOP") ? prefixed : `${prefixed}${suffix}`;
-  return wrapped;
+  // Only append STOP/HELP on first message to this recipient
+  if (!isFirstMessage || prefixed.includes("Reply STOP")) return prefixed;
+  return `${prefixed}${suffix}`;
 }
 
 /**
@@ -66,7 +66,17 @@ export async function sendSms({ to, body, tenantId, propertyId, skipCompliance, 
   }
 
   const client = getTwilioClient();
-  const complianceBody = skipCompliance ? body : wrapComplianceMessage(body);
+
+  // Check if we've sent SMS to this tenant before (for STOP/HELP suffix)
+  let isFirstMessage = true;
+  if (tenantId && !skipCompliance) {
+    const priorCount = await prisma.message.count({
+      where: { tenantId, channel: "SMS", direction: "OUTBOUND" },
+    });
+    isFirstMessage = priorCount === 0;
+  }
+
+  const complianceBody = skipCompliance ? body : wrapComplianceMessage(body, isFirstMessage);
 
   // Send via Twilio (with MMS media if provided)
   const twilioMessage = await client.messages.create({
