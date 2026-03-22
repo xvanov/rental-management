@@ -107,6 +107,7 @@ interface Listing {
   availableDate: string | null;
   unitId: string | null;
   unit: { name: string } | null;
+  photos: string[] | null;
   adCampaignId: string | null;
   adBudget: number | null;
   adDurationDays: number | null;
@@ -153,6 +154,7 @@ export default function PropertyDetailPage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [tenantHistory, setTenantHistory] = useState<TenantHistory[]>([]);
   const [createListingOpen, setCreateListingOpen] = useState(false);
+  const [editListing, setEditListing] = useState<Listing | null>(null);
   const [publishListing, setPublishListing] = useState<Listing | null>(null);
 
   const fetchProperty = useCallback(async () => {
@@ -712,6 +714,15 @@ export default function PropertyDetailPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
+                            {(listing.status === "DRAFT" || listing.status === "POSTED") && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setEditListing(listing)}
+                              >
+                                Edit
+                              </Button>
+                            )}
                             {listing.status === "DRAFT" && (
                               <Button
                                 size="sm"
@@ -759,6 +770,19 @@ export default function PropertyDetailPage() {
               onOpenChange={setCreateListingOpen}
               onCreated={fetchListings}
             />
+
+            {editListing && (
+              <CreateListingDialog
+                propertyId={id}
+                units={property.units}
+                open={!!editListing}
+                onOpenChange={(open) => {
+                  if (!open) setEditListing(null);
+                }}
+                onCreated={fetchListings}
+                editListing={editListing}
+              />
+            )}
 
             {publishListing && (
               <PublishDialog
