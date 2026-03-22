@@ -120,6 +120,7 @@ interface TenantHistory {
   active: boolean;
   moveInDate: string | null;
   moveOutDate: string | null;
+  moveOutReason: string | null;
   unit: { name: string } | null;
   leases: Array<{ status: string; startDate: string; endDate: string | null }>;
 }
@@ -865,6 +866,7 @@ export default function PropertyDetailPage() {
                         <TableHead>Unit</TableHead>
                         <TableHead>Move-In</TableHead>
                         <TableHead>Move-Out</TableHead>
+                        <TableHead>Reason</TableHead>
                         <TableHead>Lease Status</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -890,6 +892,19 @@ export default function PropertyDetailPage() {
                                   tenant.moveOutDate
                                 ).toLocaleDateString()
                               : "-"}
+                          </TableCell>
+                          <TableCell>
+                            {tenant.moveOutReason === "evicted" ? (
+                              <Badge variant="destructive">Evicted</Badge>
+                            ) : tenant.moveOutReason === "voluntary" ? (
+                              <Badge variant="secondary">Voluntary</Badge>
+                            ) : tenant.moveOutReason === "lease_ended" ? (
+                              <Badge variant="outline">Lease Ended</Badge>
+                            ) : tenant.moveOutReason ? (
+                              <Badge variant="outline">{tenant.moveOutReason}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             {tenant.leases.length > 0 ? (

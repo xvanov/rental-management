@@ -179,6 +179,7 @@ model Tenant {
   occupantCount Int       @default(1)
   moveInDate    DateTime?
   moveOutDate   DateTime?
+  moveOutReason String?          // "voluntary", "evicted", "lease_ended", "other"
   deletedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
