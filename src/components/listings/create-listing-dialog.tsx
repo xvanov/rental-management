@@ -133,9 +133,13 @@ export function CreateListingDialog({
               previewUrl: URL.createObjectURL(file),
             },
           ]);
+        } else {
+          const data = await res.json().catch(() => null);
+          setError(data?.error || `Failed to upload ${file.name}`);
         }
       } catch (err) {
         console.error("Upload failed:", err);
+        setError(`Failed to upload ${file.name}`);
       }
     }
     setUploading(false);
