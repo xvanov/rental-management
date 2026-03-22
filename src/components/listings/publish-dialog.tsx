@@ -43,6 +43,7 @@ export function PublishDialog({
     new Set()
   );
   const [runAd, setRunAd] = useState(false);
+  const [startPaused, setStartPaused] = useState(true);
   const [adBudget, setAdBudget] = useState("5");
   const [adDays, setAdDays] = useState("7");
   const [loading, setLoading] = useState(false);
@@ -74,6 +75,7 @@ export function PublishDialog({
         body.adOptions = {
           dailyBudget: Number(adBudget),
           days: Number(adDays),
+          startPaused,
         };
       }
       const res = await fetch(`/api/listings/${listing.id}/publish`, {
@@ -183,6 +185,20 @@ export function PublishDialog({
                   <div className="col-span-2 text-sm text-muted-foreground">
                     Total ad spend: <span className="font-medium text-foreground">${totalAdCost}</span> over {adDays} days
                   </div>
+                  <label className="col-span-2 flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={startPaused}
+                      onChange={() => setStartPaused(!startPaused)}
+                      className="size-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm">
+                      Start paused
+                      <span className="text-xs text-muted-foreground ml-1">
+                        (review in Ads Manager before going live)
+                      </span>
+                    </span>
+                  </label>
                 </div>
               )}
             </div>
@@ -200,7 +216,9 @@ export function PublishDialog({
               {loading
                 ? "Publishing..."
                 : runAd
-                  ? `Publish + Run Ad ($${totalAdCost})`
+                  ? startPaused
+                    ? `Publish + Create Ad (paused, $${totalAdCost})`
+                    : `Publish + Run Ad ($${totalAdCost})`
                   : "Publish"}
             </Button>
           </DialogFooter>

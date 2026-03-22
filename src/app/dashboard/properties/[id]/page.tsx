@@ -682,16 +682,25 @@ export default function PropertyDetailPage() {
                           <PlatformBadges platforms={listing.platforms} />
                         </TableCell>
                         <TableCell>
-                          {listing.adCampaignId ? (
-                            <div className="text-xs">
-                              <Badge variant="default" className="bg-blue-600">
-                                ${listing.adBudget}/day
-                              </Badge>
-                              <div className="mt-1 text-muted-foreground">
-                                {listing.adDurationDays}d
+                          {listing.adCampaignId ? (() => {
+                            const adEntry = listing.platforms?.find(
+                              (p) => p.platform === "FACEBOOK" && p.adCampaignId
+                            );
+                            const adStatus = adEntry?.adStatus ?? "ACTIVE";
+                            return (
+                              <div className="text-xs">
+                                <Badge
+                                  variant={adStatus === "PAUSED" ? "outline" : "default"}
+                                  className={adStatus === "ACTIVE" ? "bg-blue-600" : ""}
+                                >
+                                  {adStatus === "PAUSED" ? "Paused" : "Live"} ${listing.adBudget}/day
+                                </Badge>
+                                <div className="mt-1 text-muted-foreground">
+                                  {listing.adDurationDays}d
+                                </div>
                               </div>
-                            </div>
-                          ) : (
+                            );
+                          })() : (
                             <span className="text-xs text-muted-foreground">-</span>
                           )}
                         </TableCell>

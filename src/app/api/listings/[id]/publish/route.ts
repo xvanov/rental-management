@@ -16,7 +16,7 @@ export async function POST(
     const body = await request.json();
     const { platforms, adOptions } = body as {
       platforms: string[];
-      adOptions?: { dailyBudget: number; days: number };
+      adOptions?: { dailyBudget: number; days: number; startPaused?: boolean };
     };
 
     if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
@@ -68,7 +68,7 @@ export async function POST(
             state: listing.property.state,
             dailyBudgetDollars: adOptions.dailyBudget,
             durationDays: adOptions.days,
-            startPaused: false, // Go live immediately
+            startPaused: adOptions.startPaused ?? false,
           });
           adCampaignId = adResult.campaignId;
           adBudget = adOptions.dailyBudget;
@@ -80,7 +80,7 @@ export async function POST(
             postedAt: new Date().toISOString(),
             status: "POSTED",
             adCampaignId: adResult.campaignId,
-            adStatus: "ACTIVE",
+            adStatus: adOptions.startPaused ? "PAUSED" : "ACTIVE",
             adBudget: adOptions.dailyBudget,
             adDays: adOptions.days,
           });
