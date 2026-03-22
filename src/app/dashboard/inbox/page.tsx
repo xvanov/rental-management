@@ -234,9 +234,14 @@ export default function InboxPage() {
         setShowDraftApproval(false);
         setAiDraft("");
         fetchMessages(selectedTenantId);
+      } else {
+        const data = await res.json().catch(() => null);
+        const msg = data?.error || "Failed to send message";
+        alert(msg);
       }
     } catch (error) {
       console.error("Failed to send message:", error);
+      alert("Failed to send message. Check your connection.");
     } finally {
       setSending(false);
     }
