@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Sparkles, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,8 +86,9 @@ export function CreateListingDialog({
   const isEditing = !!editListing;
   const vacantUnits = units.filter((u) => u.status === "VACANT");
 
-  function handleOpenChange(next: boolean) {
-    if (next && editListing) {
+  // Populate form when editing
+  useEffect(() => {
+    if (editListing && open) {
       setForm({
         title: editListing.title,
         description: editListing.description,
@@ -100,7 +101,11 @@ export function CreateListingDialog({
         unitId: editListing.unitId ?? "",
       });
       setExistingPhotos(editListing.photos ?? []);
-    } else if (!next) {
+    }
+  }, [editListing, open]);
+
+  function handleOpenChange(next: boolean) {
+    if (!next) {
       setForm(initialForm);
       setUploads([]);
       setExistingPhotos([]);
