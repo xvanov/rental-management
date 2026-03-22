@@ -147,7 +147,7 @@ export async function PATCH(request: NextRequest) {
     if (ctx instanceof NextResponse) return ctx;
 
     const body = await request.json();
-    const { id, firstName, lastName, email, phone, unitId, occupantCount, moveInDate, moveOutDate, active } = body;
+    const { id, firstName, lastName, email, phone, unitId, occupantCount, moveInDate, moveOutDate, moveOutReason, active } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -190,6 +190,7 @@ export async function PATCH(request: NextRequest) {
     if (occupantCount !== undefined) updateData.occupantCount = Math.max(1, parseInt(occupantCount) || 1);
     if (moveInDate !== undefined) updateData.moveInDate = moveInDate ? new Date(moveInDate) : null;
     if (moveOutDate !== undefined) updateData.moveOutDate = moveOutDate ? new Date(moveOutDate) : null;
+    if (moveOutReason !== undefined) updateData.moveOutReason = moveOutReason || null;
     if (active !== undefined) updateData.active = active;
 
     const tenant = await prisma.tenant.update({

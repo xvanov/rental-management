@@ -13,7 +13,9 @@ import {
   FileText,
   MessageSquare,
   Calendar,
+  LogOut,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -21,6 +23,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -153,6 +171,9 @@ export default function TenantDetailPage() {
   const [events, setEvents] = useState<TenantEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [moveOutOpen, setMoveOutOpen] = useState(false);
+  const [moveOutReason, setMoveOutReason] = useState("voluntary");
+  const [movingOut, setMovingOut] = useState(false);
 
   const fetchTenant = useCallback(async () => {
     try {
@@ -183,6 +204,32 @@ export default function TenantDetailPage() {
     fetchTenant();
     fetchEvents();
   }, [fetchTenant, fetchEvents]);
+
+  const handleMoveOut = async () => {
+    setMovingOut(true);
+    try {
+      const res = await fetch("/api/tenants", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          active: false,
+          moveOutDate: new Date().toISOString(),
+          moveOutReason,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to move out tenant");
+      }
+      setMoveOutOpen(false);
+      fetchTenant();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to move out tenant");
+    } finally {
+      setMovingOut(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -250,10 +297,62 @@ export default function TenantDetailPage() {
             )}
           </div>
         </div>
-        <Badge variant={tenant.active ? "default" : "secondary"}>
-          {tenant.active ? "Active" : "Inactive"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={tenant.active ? "default" : "secondary"}>
+            {tenant.active ? "Active" : "Inactive"}
+          </Badge>
+          {tenant.active && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setMoveOutOpen(true)}
+            >
+              <LogOut className="mr-2 size-4" />
+              Move Out
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Move Out Dialog */}
+      <Dialog open={moveOutOpen} onOpenChange={setMoveOutOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move Out Tenant</DialogTitle>
+            <DialogDescription>
+              Mark {tenant.firstName} {tenant.lastName} as moved out. This will set them as inactive.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Reason</Label>
+              <Select value={moveOutReason} onValueChange={setMoveOutReason}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="voluntary">Voluntary Move-Out</SelectItem>
+                  <SelectItem value="evicted">Evicted</SelectItem>
+                  <SelectItem value="lease_ended">Lease Ended</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveOutOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleMoveOut}
+              disabled={movingOut}
+            >
+              {movingOut ? "Processing..." : "Confirm Move Out"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Stat Cards */}
       <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
