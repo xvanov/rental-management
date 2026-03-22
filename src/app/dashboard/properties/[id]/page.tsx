@@ -178,7 +178,10 @@ export default function PropertyDetailPage() {
   const fetchListings = useCallback(async () => {
     try {
       const res = await fetch(`/api/listings?propertyId=${id}`);
-      if (res.ok) setListings(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setListings(data.filter((l: Listing) => l.status !== "REMOVED"));
+      }
     } catch {}
   }, [id]);
 
