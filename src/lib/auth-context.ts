@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import type { OrgRole } from "@/generated/prisma/client";
 
@@ -9,10 +10,36 @@ export interface AuthContext {
 }
 
 /**
+ * Allow a test auth bypass via a special header when ENABLE_TEST_AUTH=true.
+ * Header format: X-Test-Auth: userId:organizationId:orgRole
+ * Must be explicitly enabled via env var — not active by default.
+ */
+async function getTestAuth(): Promise<AuthContext | null> {
+  if (process.env.ENABLE_TEST_AUTH !== "true") return null;
+
+  const h = await headers();
+  const testAuth = h.get("x-test-auth");
+  if (!testAuth) return null;
+
+  const [userId, organizationId, orgRole] = testAuth.split(":");
+  if (!userId || !organizationId || !orgRole) return null;
+
+  return {
+    userId,
+    organizationId,
+    orgRole: orgRole as OrgRole,
+  };
+}
+
+/**
  * Get the authenticated user's organization context.
  * Returns AuthContext on success, or a NextResponse error (401/403).
  */
 export async function getAuthContext(): Promise<AuthContext | NextResponse> {
+  // Check test auth bypass first (non-production only)
+  const testAuth = await getTestAuth();
+  if (testAuth) return testAuth;
+
   const session = await auth();
 
   if (!session?.user?.id) {
