@@ -46,11 +46,17 @@ export async function POST(
 
     for (const platform of platforms) {
       if (platform === "FACEBOOK") {
+        // Convert relative photo paths to absolute public URLs for Facebook
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "http://localhost:3000";
+        const photos = ((listing.photos as string[]) ?? []).map((p) =>
+          p.startsWith("http") ? p : `${baseUrl}${p.startsWith("/") ? "" : "/"}${p}`
+        );
+
         const result = await createListingPost({
           title: listing.title,
           description: listing.description,
           price: listing.price,
-          photos: (listing.photos as string[]) ?? undefined,
+          photos: photos.length > 0 ? photos : undefined,
           propertyId: listing.propertyId,
           location: {
             city: listing.property.city,
