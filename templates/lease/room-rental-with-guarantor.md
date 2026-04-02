@@ -1,6 +1,6 @@
-# Room Rental & Co-Living Agreement
+# Room Rental & Co-Living Agreement (with Guarantor)
 
-This Room Rental & Co-Living Agreement ("Agreement") is between **{{LESSOR_NAME}}** ("Lessor") and **_____________________________** ("Tenant").
+This Room Rental & Co-Living Agreement ("Agreement") is between **{{LESSOR_NAME}}** ("Lessor") and **_____________________________** ("Tenant"), with the guaranty of the individual(s) identified in the Guarantor Addendum attached hereto ("Guarantor(s)").
 
 **Premises:** {{PROPERTY_ADDRESS}}, Room No. **{{ROOM_NUMBER}}**
 
@@ -223,7 +223,7 @@ If any provision is invalid/unenforceable, the remainder remains effective. Fail
 
 ## 10) Signatures
 
-By signing below, the parties acknowledge that they have read this Agreement in its entirety, understand all terms and conditions, and agree to be bound by them.
+By signing below, the parties acknowledge that they have read this Agreement in its entirety, including the Guarantor Addendum, understand all terms and conditions, and agree to be bound by them.
 
 **Lessor:** {{LESSOR_NAME}}
 
@@ -235,6 +235,50 @@ Signature: ________________________________ Date: ________________
 Print Name: ________________________________
 
 Signature: ________________________________ Date: ________________
+
+---
+
+# Guarantor Addendum
+
+## Guarantor Agreement
+
+The undersigned Guarantor(s) hereby unconditionally and irrevocably guarantee(s) to Lessor the full and timely performance of all obligations of the Tenant under this Room Rental & Co-Living Agreement, including but not limited to:
+
+- Payment of all monthly rent and any additional charges when due
+- Payment of any late fees, damages, or costs arising from Tenant's breach
+- Payment of any amounts owed upon early termination by Tenant
+- Any costs of collection, including reasonable attorney's fees
+
+### Terms of Guaranty
+
+1. **Joint and Several Liability.** If more than one Guarantor signs below, each Guarantor is jointly and severally liable for the full amount of Tenant's obligations. Lessor may pursue any or all Guarantors for any amounts owed.
+
+2. **Duration.** This Guaranty remains in effect for the entire term of the Agreement, including any renewals or extensions, and continues until all obligations under the Agreement are fully satisfied.
+
+3. **Waiver of Notice.** Guarantor(s) waive any right to require Lessor to (a) proceed first against Tenant before seeking payment from Guarantor, (b) pursue any other remedy before seeking payment from Guarantor, or (c) notify Guarantor of any default by Tenant (though Lessor may provide such notice as a courtesy).
+
+4. **No Release.** Guarantor's obligations shall not be released, diminished, or affected by: any modification of the Agreement between Lessor and Tenant; any extension of time for payment granted to Tenant; any forbearance by Lessor; or any bankruptcy or insolvency of Tenant.
+
+5. **Governing Law.** This Guaranty is governed by the laws of the State of {{STATE_NAME}}, {{COUNTY_NAME}}.
+
+### Guarantor Signature(s)
+
+**Guarantor 1:**
+
+Print Name: ________________________________
+
+Signature: ________________________________ Date: ________________
+
+Email: ________________________________ Phone: ________________________________
+
+
+**Guarantor 2:** (if applicable)
+
+Print Name: ________________________________
+
+Signature: ________________________________ Date: ________________
+
+Email: ________________________________ Phone: ________________________________
 
 ---
 

@@ -37,6 +37,13 @@ export async function GET(
 
     const { lease } = signingToken;
 
+    if (!lease.unit) {
+      return NextResponse.json(
+        { error: "Lease is missing unit" },
+        { status: 400 }
+      );
+    }
+
     const pdfBuffer = await generateLeasePdfBuffer(lease);
 
     return new NextResponse(new Uint8Array(pdfBuffer), {

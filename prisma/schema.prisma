@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider      = "prisma-client"
+  output        = "../src/generated/prisma"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -245,8 +246,8 @@ enum LeaseStatus {
 
 model Lease {
   id        String      @id @default(cuid())
-  tenantId  String
-  unitId    String
+  tenantId  String?
+  unitId    String?
   templateId String?
   status    LeaseStatus @default(DRAFT)
   content   String
@@ -259,8 +260,8 @@ model Lease {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  unit          Unit           @relation(fields: [unitId], references: [id])
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id])
+  unit          Unit?          @relation(fields: [unitId], references: [id])
   template      LeaseTemplate? @relation(fields: [templateId], references: [id])
   clauses       LeaseClause[]
   signingTokens SigningToken[]
@@ -289,10 +290,12 @@ model SigningToken {
   leaseId     String
   signerEmail String
   signerName  String
+  signerRole  String    @default("TENANT") // TENANT, GUARANTOR
   expiresAt   DateTime
   usedAt      DateTime?
   ipAddress   String?
   userAgent   String?
+  signatureDataUrl String? // Stored signature image for multi-signer PDF assembly
   createdAt   DateTime  @default(now())
 
   lease Lease @relation(fields: [leaseId], references: [id])
@@ -523,25 +526,32 @@ enum ApplicationStatus {
 }
 
 model Application {
-  id             String            @id @default(cuid())
-  tenantId       String?
-  token          String            @unique @default(cuid())
-  status         ApplicationStatus @default(PENDING)
-  firstName      String?
-  lastName       String?
-  email          String?
-  phone          String?
-  currentAddress String?
-  employer       String?
-  income         Float?
-  rentalHistory  Json?
-  evictionHistory Json?
-  documents      Json?
-  submittedAt    DateTime?
-  reviewedAt     DateTime?
-  reviewNotes    String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                     String            @id @default(cuid())
+  tenantId               String?
+  token                  String            @unique @default(cuid())
+  status                 ApplicationStatus @default(PENDING)
+  firstName              String?
+  lastName               String?
+  email                  String?
+  phone                  String?
+  currentAddress         String?
+  moveInDate             String?
+  incomeSource           String?           // employment, self-employed, retirement, disability, other
+  incomeDetails          String?           // employer name, business name, or description
+  income                 Float?
+  employer               String?           // kept for backwards compatibility
+  vehicles               Json?             // [{ make, model, year, color, licensePlate }]
+  rentalHistory          Json?
+  evictionHistory        Json?
+  idDocument             Json?             // { name, type, size, dataUrl } — driver's license/ID
+  financialDocuments     Json?             // [{ name, type, size, dataUrl }] — pay stubs, bank statements
+  documents              Json?             // kept for backwards compatibility (general docs)
+  backgroundCheckConsent Boolean           @default(false)
+  submittedAt            DateTime?
+  reviewedAt             DateTime?
+  reviewNotes            String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
 

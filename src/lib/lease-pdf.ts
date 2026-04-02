@@ -4,16 +4,16 @@ import path from "path";
 
 interface LeaseForPdf {
   content: string;
-  tenant: {
+  tenant?: {
     firstName: string;
     lastName: string;
-  };
-  unit: {
+  } | null;
+  unit?: {
     name: string;
     property: {
       address: string;
     };
-  };
+  } | null;
 }
 
 /**
@@ -29,9 +29,10 @@ export function generateLeaseHtml(
   content: string,
   signatureBase64: string,
   currentDate: string,
-  tenantSignature?: { name: string; signatureDataUrl: string; date: string }
+  tenantSignature?: { name: string; signatureDataUrl: string; date: string },
+  guarantorSignatures?: Array<{ name: string; signatureDataUrl: string; date: string }>
 ): string {
-  const contentHtml = convertContentToHtml(content, signatureBase64, currentDate, tenantSignature);
+  const contentHtml = convertContentToHtml(content, signatureBase64, currentDate, tenantSignature, guarantorSignatures);
 
   return `
 <!DOCTYPE html>
@@ -201,7 +202,8 @@ export function loadLessorSignature(): string {
  */
 export async function generateLeasePdfBuffer(
   lease: LeaseForPdf,
-  tenantSignature?: { name: string; signatureDataUrl: string; date: string }
+  tenantSignature?: { name: string; signatureDataUrl: string; date: string },
+  guarantorSignatures?: Array<{ name: string; signatureDataUrl: string; date: string }>
 ): Promise<Buffer> {
   const signatureBase64 = loadLessorSignature();
   const currentDate = new Date().toLocaleDateString("en-US", {
@@ -210,7 +212,7 @@ export async function generateLeasePdfBuffer(
     day: "numeric",
   });
 
-  const htmlContent = generateLeaseHtml(lease.content, signatureBase64, currentDate, tenantSignature);
+  const htmlContent = generateLeaseHtml(lease.content, signatureBase64, currentDate, tenantSignature, guarantorSignatures);
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -247,7 +249,8 @@ function convertContentToHtml(
   content: string,
   signatureBase64: string,
   currentDate: string,
-  tenantSignature?: { name: string; signatureDataUrl: string; date: string }
+  tenantSignature?: { name: string; signatureDataUrl: string; date: string },
+  guarantorSignatures?: Array<{ name: string; signatureDataUrl: string; date: string }>
 ): string {
   // When signing, replace the blank tenant name on the first page with the actual name
   let processedContent = content;
@@ -323,6 +326,24 @@ function convertContentToHtml(
             </div>
           </div>
         </div>
+        ${(guarantorSignatures && guarantorSignatures.length > 0) ? guarantorSignatures.map((gs, i) => `
+        <div class="signature-block">
+          <div class="party-label">Guarantor ${i + 1}: ${gs.name || "_____________________________"}</div>
+          <div class="printed-name">Print Name: ${gs.name || "_____________________________"}</div>
+          <div class="signature-line">
+            <div class="signature-field">
+              <div class="line">
+                ${gs.signatureDataUrl ? `<img src="${gs.signatureDataUrl}" alt="Guarantor ${i + 1} Signature" />` : ""}
+              </div>
+              <div class="label">Signature</div>
+            </div>
+            <div class="date-field">
+              <div class="line">${gs.date || ""}</div>
+              <div class="label">Date</div>
+            </div>
+          </div>
+        </div>
+        `).join("") : ""}
       </div>
       <hr>
     `;

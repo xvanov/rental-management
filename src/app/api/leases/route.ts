@@ -15,7 +15,13 @@ export async function GET(request: NextRequest) {
 
     if (id) {
       const lease = await prisma.lease.findFirst({
-        where: { id, unit: { property: { organizationId: ctx.organizationId } } },
+        where: {
+          id,
+          OR: [
+            { unit: { property: { organizationId: ctx.organizationId } } },
+            { unitId: null },
+          ],
+        },
         include: {
           tenant: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
           unit: { include: { property: true } },
@@ -35,7 +41,10 @@ export async function GET(request: NextRequest) {
     }
 
     const where: Record<string, unknown> = {
-      unit: { property: { organizationId: ctx.organizationId } },
+      OR: [
+        { unit: { property: { organizationId: ctx.organizationId } } },
+        { unitId: null },
+      ],
     };
     if (tenantId) where.tenantId = tenantId;
     if (status) where.status = status;
@@ -126,8 +135,8 @@ export async function POST(request: NextRequest) {
         action: "CREATED",
         version: lease.version,
       },
-      tenantId: lease.tenantId,
-      propertyId: lease.unit.propertyId,
+      tenantId: lease.tenantId || undefined,
+      propertyId: lease.unit?.propertyId,
     });
 
     return NextResponse.json(lease, { status: 201 });
@@ -229,8 +238,8 @@ export async function PATCH(request: NextRequest) {
           action,
           version: lease.version,
         },
-        tenantId: lease.tenantId,
-        propertyId: lease.unit.propertyId,
+        tenantId: lease.tenantId || undefined,
+        propertyId: lease.unit?.propertyId,
       });
 
       // Auto move-out tenant when lease expires or is terminated
@@ -239,7 +248,7 @@ export async function PATCH(request: NextRequest) {
         const moveOutDate = lease.endDate ?? new Date();
 
         await prisma.tenant.update({
-          where: { id: lease.tenantId },
+          where: { id: lease.tenantId! },
           data: {
             active: false,
             moveOutDate,
@@ -249,7 +258,7 @@ export async function PATCH(request: NextRequest) {
 
         // Set unit to vacant
         await prisma.unit.update({
-          where: { id: lease.unitId },
+          where: { id: lease.unitId! },
           data: { status: "VACANT" },
         });
 
@@ -257,11 +266,11 @@ export async function PATCH(request: NextRequest) {
           type: "SYSTEM",
           payload: {
             action: "TENANT_MOVED_OUT",
-            description: `${lease.tenant.firstName} ${lease.tenant.lastName} moved out (${moveOutReason})`,
+            description: `${lease.tenant?.firstName} ${lease.tenant?.lastName} moved out (${moveOutReason})`,
             metadata: { tenantId: lease.tenantId, leaseId: lease.id, reason: moveOutReason },
           },
-          tenantId: lease.tenantId,
-          propertyId: lease.unit.propertyId,
+          tenantId: lease.tenantId || undefined,
+          propertyId: lease.unit?.propertyId,
         });
       }
     }

@@ -84,6 +84,8 @@ export function DateRangePicker({
           selected={value}
           onSelect={onChange}
           numberOfMonths={numberOfMonths}
+          startMonth={new Date(2020, 0)}
+          endMonth={new Date(2035, 11)}
         />
         <div className="p-3 border-t flex justify-between">
           <Button

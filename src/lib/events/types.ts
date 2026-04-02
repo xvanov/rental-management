@@ -59,6 +59,8 @@ export interface LeaseEventPayload {
   leaseId: string;
   action: "CREATED" | "SIGNED" | "RENEWED" | "TERMINATED" | "EXPIRED";
   version?: number;
+  previousLeaseId?: string;
+  previousVersion?: number;
   signerName?: string;
   signerEmail?: string;
   ipAddress?: string;

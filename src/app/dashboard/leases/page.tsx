@@ -10,6 +10,7 @@ import {
   Search,
   FilePlus2,
   Eye,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,9 +87,19 @@ interface Template {
   name: string;
 }
 
+interface Applicant {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string;
+}
+
 export default function LeasesPage() {
   const [leases, setLeases] = useState<Lease[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,6 +116,8 @@ export default function LeasesPage() {
   const [genRentAmount, setGenRentAmount] = useState("");
   const [genSecurityDeposit, setGenSecurityDeposit] = useState("");
   const [genLessorName, setGenLessorName] = useState("");
+  const [genMonthToMonth, setGenMonthToMonth] = useState(false);
+  const [genTemplateOnly, setGenTemplateOnly] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
   const fetchLeases = useCallback(async () => {
@@ -124,12 +137,17 @@ export default function LeasesPage() {
 
   const fetchFormData = useCallback(async () => {
     try {
-      const [tenantsRes, templatesRes] = await Promise.all([
+      const [tenantsRes, templatesRes, applicantsRes] = await Promise.all([
         fetch("/api/tenants"),
         fetch("/api/lease-templates"),
+        fetch("/api/applications?status=UNDER_REVIEW"),
       ]);
       if (tenantsRes.ok) setTenants(await tenantsRes.json());
       if (templatesRes.ok) setTemplates(await templatesRes.json());
+      if (applicantsRes.ok) {
+        const apps = await applicantsRes.json();
+        setApplicants(apps.filter((a: Applicant) => a.firstName && a.lastName));
+      }
     } catch (error) {
       console.error("Failed to fetch form data:", error);
     }
@@ -212,23 +230,54 @@ export default function LeasesPage() {
   }, [tenants]);
 
   const handleGenerate = async () => {
-    if (!genTemplateId || !genTenantId || !genUnitId || !genDateRange?.from || !genRentAmount || !genSecurityDeposit || !genLessorName) return;
+    if (!genTemplateId || !genDateRange?.from || !genRentAmount || !genSecurityDeposit || !genLessorName) return;
+    if (!genTemplateOnly && (!genTenantId || !genUnitId)) return;
+    if (!genMonthToMonth && !genDateRange?.to) return;
 
     setGenerating(true);
     setGenError(null);
     try {
+      // If an applicant is selected (ID starts with "app-"), create tenant first
+      let actualTenantId = genTenantId;
+      if (!genTemplateOnly && genTenantId.startsWith("app-")) {
+        const appId = genTenantId.replace("app-", "");
+        const app = applicants.find((a) => a.id === appId);
+        if (!app) { setGenError("Applicant not found"); setGenerating(false); return; }
+
+        const createRes = await fetch("/api/tenants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            firstName: app.firstName,
+            lastName: app.lastName,
+            email: app.email,
+            phone: app.phone,
+            unitId: genUnitId,
+          }),
+        });
+        if (!createRes.ok) {
+          const err = await createRes.json();
+          setGenError(err.error || "Failed to create tenant from applicant");
+          setGenerating(false);
+          return;
+        }
+        const newTenant = await createRes.json();
+        actualTenantId = newTenant.id;
+      }
+
       const res = await fetch("/api/leases/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           templateId: genTemplateId,
-          tenantId: genTenantId,
-          unitId: genUnitId,
+          tenantId: genTemplateOnly ? undefined : actualTenantId,
+          unitId: genTemplateOnly ? undefined : genUnitId,
           startDate: format(genDateRange.from, "yyyy-MM-dd"),
           endDate: genDateRange.to ? format(genDateRange.to, "yyyy-MM-dd") : undefined,
           rentAmount: genRentAmount,
           securityDeposit: genSecurityDeposit,
           lessorName: genLessorName,
+          monthToMonth: genMonthToMonth,
         }),
       });
       if (res.ok) {
@@ -240,6 +289,8 @@ export default function LeasesPage() {
         setGenRentAmount("");
         setGenSecurityDeposit("");
         setGenLessorName("");
+        setGenMonthToMonth(false);
+        setGenTemplateOnly(false);
         setGenError(null);
         fetchLeases();
       } else {
@@ -273,11 +324,12 @@ export default function LeasesPage() {
   const filteredLeases = leases.filter((lease) => {
     if (!search) return true;
     const searchLower = search.toLowerCase();
-    const tenantName = `${lease.tenant.firstName} ${lease.tenant.lastName}`.toLowerCase();
+    const tenantName = lease.tenant ? `${lease.tenant.firstName} ${lease.tenant.lastName}`.toLowerCase() : "";
     return (
       tenantName.includes(searchLower) ||
-      lease.unit.name.toLowerCase().includes(searchLower) ||
-      lease.unit.property.address.toLowerCase().includes(searchLower)
+      (lease.unit?.name || "").toLowerCase().includes(searchLower) ||
+      (lease.unit?.property?.address || "").toLowerCase().includes(searchLower) ||
+      (lease.template?.name || "").toLowerCase().includes(searchLower)
     );
   });
 
@@ -345,13 +397,42 @@ export default function LeasesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="templateOnly"
+                    checked={genTemplateOnly}
+                    onChange={(e) => {
+                      setGenTemplateOnly(e.target.checked);
+                      if (e.target.checked) { setGenTenantId(""); setGenUnitId(""); }
+                    }}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="templateOnly" className="font-normal cursor-pointer">
+                    Template only (generate without assigning a tenant)
+                  </Label>
+                </div>
+                {!genTemplateOnly && (<>
                 <div>
-                  <Label>Send to Tenant</Label>
+                  <Label>Send to</Label>
                   <Select value={genTenantId} onValueChange={setGenTenantId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select tenant to send lease to" />
+                      <SelectValue placeholder="Select tenant or applicant" />
                     </SelectTrigger>
                     <SelectContent>
+                      {applicants.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs text-muted-foreground font-semibold">
+                            Applicants
+                          </SelectLabel>
+                          {applicants.map((a) => (
+                            <SelectItem key={`app-${a.id}`} value={`app-${a.id}`}>
+                              {a.firstName} {a.lastName}
+                              <span className="text-muted-foreground ml-1">(applicant)</span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
                       {tenantsGroupedByProperty.map((group) => (
                         <SelectGroup key={group.address}>
                           <SelectLabel className="text-xs text-muted-foreground">
@@ -371,7 +452,7 @@ export default function LeasesPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {selectedTenant && !selectedTenant.email && (
+                  {selectedTenant && !selectedTenant?.email && (
                     <p className="text-xs text-destructive mt-1">
                       Warning: This tenant has no email address for e-signing
                     </p>
@@ -392,8 +473,9 @@ export default function LeasesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                </>)}
                 <div>
-                  <Label>Lessor Name <span className="text-destructive">*</span></Label>
+                  <Label>Lessor Name</Label>
                   <Input
                     type="text"
                     placeholder="Name of the lessor/landlord"
@@ -401,15 +483,40 @@ export default function LeasesPage() {
                     onChange={(e) => setGenLessorName(e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label>Lease Term <span className="text-destructive">*</span></Label>
-                  <DateRangePicker
-                    value={genDateRange}
-                    onChange={setGenDateRange}
-                    placeholder="Select start and end dates"
-                    fromLabel="Start"
-                    toLabel="End"
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="monthToMonth"
+                    checked={genMonthToMonth}
+                    onChange={(e) => {
+                      setGenMonthToMonth(e.target.checked);
+                      if (e.target.checked && genDateRange?.from) {
+                        setGenDateRange({ from: genDateRange.from, to: undefined });
+                      }
+                    }}
+                    className="h-4 w-4"
                   />
+                  <Label htmlFor="monthToMonth" className="font-normal cursor-pointer">
+                    Month-to-month (no fixed end date, 30-day notice to terminate)
+                  </Label>
+                </div>
+                <div>
+                  <Label>{genMonthToMonth ? "Start Date" : "Lease Term"} <span className="text-destructive">*</span></Label>
+                  {genMonthToMonth ? (
+                    <Input
+                      type="date"
+                      value={genDateRange?.from ? format(genDateRange.from, "yyyy-MM-dd") : ""}
+                      onChange={(e) => setGenDateRange({ from: e.target.value ? new Date(e.target.value + "T00:00:00") : undefined, to: undefined })}
+                    />
+                  ) : (
+                    <DateRangePicker
+                      value={genDateRange}
+                      onChange={setGenDateRange}
+                      placeholder="Select start and end dates"
+                      fromLabel="Start"
+                      toLabel="End"
+                    />
+                  )}
                 </div>
                 <div>
                   <Label>Monthly Rent <span className="text-destructive">*</span></Label>
@@ -442,9 +549,9 @@ export default function LeasesPage() {
                   onClick={handleGenerate}
                   disabled={
                     !genTemplateId ||
-                    !genTenantId ||
-                    !genUnitId ||
+                    (!genTemplateOnly && (!genTenantId || !genUnitId)) ||
                     !genDateRange?.from ||
+                    (!genMonthToMonth && !genDateRange?.to) ||
                     !genRentAmount ||
                     !genSecurityDeposit ||
                     !genLessorName ||
@@ -558,20 +665,28 @@ export default function LeasesPage() {
               {filteredLeases.map((lease) => (
                 <TableRow key={lease.id}>
                   <TableCell>
-                    <Link
-                      href={`/dashboard/tenants/${lease.tenant.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {lease.tenant.firstName} {lease.tenant.lastName}
-                    </Link>
+                    {lease.tenant ? (
+                      <Link
+                        href={`/dashboard/tenants/${lease.tenant.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {lease.tenant.firstName} {lease.tenant.lastName}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground italic">No tenant assigned</span>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <div>
-                      <div className="font-medium">{lease.unit.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {lease.unit.property.address}
+                    {lease.unit ? (
+                      <div>
+                        <div className="font-medium">{lease.unit.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {lease.unit.property.address}
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <span className="text-muted-foreground italic">No unit</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant={statusBadgeVariant(lease.status)}>
@@ -595,11 +710,20 @@ export default function LeasesPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" asChild>
-                      <Link href={`/dashboard/leases/${lease.id}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" asChild>
+                        <Link href={`/dashboard/leases/${lease.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      {(lease.status === "ACTIVE" || lease.status === "EXPIRED") && (
+                        <Button variant="ghost" size="icon" asChild title="Renew Lease">
+                          <Link href={`/dashboard/leases/${lease.id}?renew=true`}>
+                            <RefreshCw className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -17,6 +17,10 @@ import {
   Calendar,
   DollarSign,
   ExternalLink,
+  RefreshCw,
+  Eye,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +31,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +79,7 @@ interface Lease {
 export default function LeaseDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id as string;
 
   const [lease, setLease] = useState<Lease | null>(null);
@@ -86,6 +93,12 @@ export default function LeaseDetailPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [guarantors, setGuarantors] = useState<Array<{ name: string; email: string }>>([]);
+  const [renewDialogOpen, setRenewDialogOpen] = useState(false);
+  const [renewing, setRenewing] = useState(false);
+  const [renewStartDate, setRenewStartDate] = useState("");
+  const [renewEndDate, setRenewEndDate] = useState("");
+  const [renewRentAmount, setRenewRentAmount] = useState("");
 
   const fetchLease = useCallback(async () => {
     try {
@@ -112,6 +125,14 @@ export default function LeaseDetailPage() {
     fetchLease();
   }, [fetchLease]);
 
+  // Auto-open renewal dialog if ?renew=true is in the URL
+  useEffect(() => {
+    if (lease && searchParams.get("renew") === "true" && !renewDialogOpen) {
+      openRenewDialog();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lease, searchParams]);
+
   const handleSendForSignature = async () => {
     if (!lease) return;
     setSending(true);
@@ -121,7 +142,10 @@ export default function LeaseDetailPage() {
       const res = await fetch("/api/leases/sign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leaseId: lease.id }),
+        body: JSON.stringify({
+          leaseId: lease.id,
+          guarantors: guarantors.filter((g) => g.name && g.email),
+        }),
       });
 
       if (res.ok) {
@@ -154,7 +178,7 @@ export default function LeaseDetailPage() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `lease-${lease.tenant.lastName}-${lease.unit.name}.pdf`;
+        a.download = `lease-${lease.tenant?.lastName || "draft"}-${lease.unit?.name || "template"}.pdf`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -167,6 +191,55 @@ export default function LeaseDetailPage() {
       alert("Failed to download PDF");
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const openRenewDialog = () => {
+    if (!lease) return;
+    // Pre-fill with defaults
+    const oldEnd = lease.endDate ? new Date(lease.endDate) : new Date();
+    const newStart = new Date(oldEnd);
+    newStart.setDate(newStart.getDate() + 1);
+
+    // Same term length
+    const oldStart = new Date(lease.startDate);
+    const termMs = oldEnd.getTime() - oldStart.getTime();
+    const newEnd = new Date(newStart.getTime() + termMs);
+
+    setRenewStartDate(newStart.toISOString().split("T")[0]);
+    setRenewEndDate(newEnd.toISOString().split("T")[0]);
+    setRenewRentAmount(lease.rentAmount?.toString() || "");
+    setRenewDialogOpen(true);
+  };
+
+  const handleRenewLease = async () => {
+    if (!lease) return;
+    setRenewing(true);
+
+    try {
+      const res = await fetch("/api/leases/renew", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leaseId: lease.id,
+          startDate: renewStartDate,
+          endDate: renewEndDate,
+          rentAmount: renewRentAmount ? parseFloat(renewRentAmount) : undefined,
+        }),
+      });
+
+      if (res.ok) {
+        const newLease = await res.json();
+        setRenewDialogOpen(false);
+        router.push(`/dashboard/leases/${newLease.id}`);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to renew lease");
+      }
+    } catch {
+      alert("Failed to renew lease");
+    } finally {
+      setRenewing(false);
     }
   };
 
@@ -257,12 +330,12 @@ export default function LeaseDetailPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold">
-                Lease for {lease.tenant.firstName} {lease.tenant.lastName}
+                Lease {lease.tenant ? `for ${lease.tenant?.firstName} ${lease.tenant?.lastName}` : "(Template Draft)"}
               </h1>
               {statusBadge(lease.status)}
             </div>
             <p className="text-muted-foreground">
-              {lease.unit.name} at {lease.unit.property.address}
+              {lease.unit ? `${lease.unit?.name} at ${lease.unit?.property.address}` : "Template — no unit assigned"}
             </p>
           </div>
         </div>
@@ -274,6 +347,12 @@ export default function LeaseDetailPage() {
               <Download className="mr-2 h-4 w-4" />
             )}
             Download PDF
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href={`/dashboard/leases/preview/${lease.id}`}>
+              <Eye className="mr-2 h-4 w-4" />
+              Preview as Tenant
+            </Link>
           </Button>
           {(lease.status === "DRAFT" || lease.status === "PENDING_SIGNATURE") && (
             <Button onClick={() => setConfirmDialogOpen(true)}>
@@ -298,6 +377,12 @@ export default function LeaseDetailPage() {
                 <ExternalLink className="mr-2 h-4 w-4" />
                 View Signed Document
               </a>
+            </Button>
+          )}
+          {(lease.status === "ACTIVE" || lease.status === "EXPIRED") && (
+            <Button variant="outline" onClick={openRenewDialog}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Renew Lease
             </Button>
           )}
         </div>
@@ -335,8 +420,8 @@ export default function LeaseDetailPage() {
               </div>
             </div>
           )}
-          {emailSent && lease.tenant.email && (
-            <p className="text-sm mt-2">An email was also sent to {lease.tenant.email}.</p>
+          {emailSent && lease.tenant?.email && (
+            <p className="text-sm mt-2">An email was also sent to {lease.tenant?.email}.</p>
           )}
           {!emailSent && emailError && (
             <div className="mt-3 rounded-md bg-yellow-50 border border-yellow-300 p-3 text-yellow-800">
@@ -358,14 +443,20 @@ export default function LeaseDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Link
-              href={`/dashboard/tenants/${lease.tenant.id}`}
-              className="font-medium hover:underline"
-            >
-              {lease.tenant.firstName} {lease.tenant.lastName}
-            </Link>
-            {lease.tenant.email && (
-              <p className="text-sm text-muted-foreground">{lease.tenant.email}</p>
+            {lease.tenant ? (
+              <>
+                <Link
+                  href={`/dashboard/tenants/${lease.tenant.id}`}
+                  className="font-medium hover:underline"
+                >
+                  {lease.tenant?.firstName} {lease.tenant?.lastName}
+                </Link>
+                {lease.tenant?.email && (
+                  <p className="text-sm text-muted-foreground">{lease.tenant?.email}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-muted-foreground italic">No tenant assigned</p>
             )}
           </CardContent>
         </Card>
@@ -378,9 +469,9 @@ export default function LeaseDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="font-medium">{lease.unit.name}</p>
+            <p className="font-medium">{lease.unit?.name}</p>
             <p className="text-sm text-muted-foreground">
-              {lease.unit.property.address}, {lease.unit.property.city}
+              {lease.unit?.property.address}, {lease.unit?.property.city}
             </p>
           </CardContent>
         </Card>
@@ -462,34 +553,174 @@ export default function LeaseDetailPage() {
         </Card>
       )}
 
-      {/* Send for Signature Confirmation Dialog */}
-      <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+      {/* Renew Lease Dialog */}
+      <Dialog open={renewDialogOpen} onOpenChange={setRenewDialogOpen}>
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Renew Lease</DialogTitle>
+            <DialogDescription>
+              Create a new lease for {lease.tenant?.firstName} {lease.tenant?.lastName} at{" "}
+              {lease.unit?.name} with the same terms. Adjust dates and rent as needed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="renewStart">Start Date</Label>
+                <Input
+                  id="renewStart"
+                  type="date"
+                  value={renewStartDate}
+                  onChange={(e) => setRenewStartDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="renewEnd">End Date</Label>
+                <Input
+                  id="renewEnd"
+                  type="date"
+                  value={renewEndDate}
+                  onChange={(e) => setRenewEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="renewRent">Monthly Rent ($)</Label>
+              <Input
+                id="renewRent"
+                type="number"
+                step="0.01"
+                value={renewRentAmount}
+                onChange={(e) => setRenewRentAmount(e.target.value)}
+              />
+              {lease.rentAmount && renewRentAmount && parseFloat(renewRentAmount) !== lease.rentAmount && (
+                <p className="text-xs text-muted-foreground">
+                  Changed from ${lease.rentAmount.toFixed(2)} → ${parseFloat(renewRentAmount).toFixed(2)}
+                  {parseFloat(renewRentAmount) > lease.rentAmount
+                    ? ` (+$${(parseFloat(renewRentAmount) - lease.rentAmount).toFixed(2)})`
+                    : ` (-$${(lease.rentAmount - parseFloat(renewRentAmount)).toFixed(2)})`}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <p>This will create a new <strong>DRAFT</strong> lease (v{lease.version + 1}) with the current lease content.</p>
+              <p className="mt-1 text-muted-foreground">You can edit the content and send it for signature from the new lease page.</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenewDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleRenewLease} disabled={renewing || !renewStartDate}>
+              {renewing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Create Renewal
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send for Signature Confirmation Dialog */}
+      <Dialog open={confirmDialogOpen} onOpenChange={(open) => {
+        setConfirmDialogOpen(open);
+        if (!open) { setGuarantors([]); setSendError(null); }
+      }}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {lease.status === "PENDING_SIGNATURE" ? "Resend Lease for Signature" : "Send Lease for Signature"}
             </DialogTitle>
             <DialogDescription>
-              This will {lease.status === "PENDING_SIGNATURE" ? "resend" : "send"} the lease to{" "}
-              {lease.tenant.firstName} {lease.tenant.lastName} for electronic signature.
+              Send the lease to the tenant{guarantors.length > 0 ? " and guarantor(s)" : ""} for electronic signature.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            {lease.tenant.email ? (
+            {/* Tenant */}
+            {lease.tenant?.email ? (
               <div className="rounded-md bg-muted p-3">
+                <p className="text-sm font-medium">Tenant</p>
                 <p className="text-sm">
-                  An email will be sent to: <strong>{lease.tenant.email}</strong>
+                  {lease.tenant?.firstName} {lease.tenant?.lastName} — <strong>{lease.tenant?.email}</strong>
                 </p>
               </div>
             ) : (
               <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-yellow-800">
                 <p className="text-sm">
                   <AlertCircle className="inline h-4 w-4 mr-1" />
-                  Warning: This tenant does not have an email address. You may need to add one first.
+                  Tenant does not have an email address. Add one first.
                 </p>
               </div>
             )}
+
+            {/* Guarantors */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Guarantors (optional)</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGuarantors([...guarantors, { name: "", email: "" }])}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add Guarantor
+                </Button>
+              </div>
+
+              {guarantors.map((g, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <div className="flex-1 space-y-1">
+                    <Input
+                      placeholder="Full name"
+                      value={g.name}
+                      onChange={(e) => {
+                        const updated = [...guarantors];
+                        updated[i] = { ...updated[i], name: e.target.value };
+                        setGuarantors(updated);
+                      }}
+                    />
+                    <Input
+                      placeholder="Email address"
+                      type="email"
+                      value={g.email}
+                      onChange={(e) => {
+                        const updated = [...guarantors];
+                        updated[i] = { ...updated[i], email: e.target.value };
+                        setGuarantors(updated);
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 mt-1"
+                    onClick={() => setGuarantors(guarantors.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                </div>
+              ))}
+
+              {guarantors.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Each guarantor will receive a separate signing link. The lease activates only after everyone signs.
+                </p>
+              )}
+            </div>
 
             {sendError && (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -504,7 +735,7 @@ export default function LeaseDetailPage() {
             </Button>
             <Button
               onClick={handleSendForSignature}
-              disabled={sending || !lease.tenant.email}
+              disabled={sending || !lease.tenant?.email}
             >
               {sending ? (
                 <>
@@ -514,7 +745,7 @@ export default function LeaseDetailPage() {
               ) : (
                 <>
                   <Send className="mr-2 h-4 w-4" />
-                  {lease.status === "PENDING_SIGNATURE" ? "Resend" : "Send for Signature"}
+                  {lease.status === "PENDING_SIGNATURE" ? "Resend" : `Send${guarantors.filter(g => g.name && g.email).length > 0 ? ` to ${1 + guarantors.filter(g => g.name && g.email).length} signers` : " for Signature"}`}
                 </>
               )}
             </Button>

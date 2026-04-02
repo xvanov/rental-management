@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    if (!lease || lease.unit.property.organizationId !== ctx.organizationId) {
+    if (!lease || (lease.unit && lease.unit.property.organizationId !== ctx.organizationId)) {
       return NextResponse.json(
         { error: "Lease not found" },
         { status: 404 }
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse(new Uint8Array(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="lease-${lease.tenant.lastName}-${lease.unit.name}.pdf"`,
+        "Content-Disposition": `attachment; filename="lease-${lease.tenant?.lastName || "draft"}-${lease.unit?.name || "template"}.pdf"`,
       },
     });
   } catch (error) {

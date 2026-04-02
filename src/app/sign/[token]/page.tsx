@@ -209,7 +209,7 @@ export default function SignLeasePage() {
             </p>
             {signedLeaseId && (
               <Button asChild>
-                <a href={`/api/signed-documents/${signedLeaseId}`} download>
+                <a href={`/api/signed-documents/${signedLeaseId}?token=${token}`} download>
                   <Download className="mr-2 h-4 w-4" />
                   Download Signed Lease
                 </a>

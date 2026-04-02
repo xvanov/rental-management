@@ -11,14 +11,17 @@ export async function POST(request: NextRequest) {
     if (ctx instanceof NextResponse) return ctx;
 
     const body = await request.json();
-    const { templateId, tenantId, unitId, startDate, endDate, rentAmount, securityDeposit, lessorName, customFields } = body;
+    const { templateId, tenantId, unitId, startDate, endDate, rentAmount, securityDeposit, lessorName, monthToMonth, customFields } = body;
 
-    if (!templateId || !tenantId || !unitId || !startDate) {
+    if (!templateId || !startDate) {
       return NextResponse.json(
-        { error: "templateId, tenantId, unitId, and startDate are required" },
+        { error: "templateId and startDate are required" },
         { status: 400 }
       );
     }
+
+    // If no tenant/unit, this is a template-only generation (draft without tenant)
+    const isTemplateOnly = !tenantId || !unitId;
 
     if (!rentAmount) {
       return NextResponse.json(
@@ -53,38 +56,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fetch tenant and verify it belongs to this org
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      include: { unit: { include: { property: true } } },
-    });
+    // Fetch tenant and unit if provided
+    let tenant = null;
+    let unit = null;
 
-    if (!tenant || tenant.unit?.property?.organizationId !== ctx.organizationId) {
-      return NextResponse.json(
-        { error: "Tenant not found" },
-        { status: 404 }
-      );
+    if (tenantId) {
+      tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { unit: { include: { property: true } } },
+      });
+      if (!tenant || tenant.unit?.property?.organizationId !== ctx.organizationId) {
+        return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+      }
     }
 
-    // Fetch unit with property and verify it belongs to this org
-    const unit = await prisma.unit.findUnique({
-      where: { id: unitId },
-      include: { property: true },
-    });
-
-    if (!unit || unit.property.organizationId !== ctx.organizationId) {
-      return NextResponse.json(
-        { error: "Unit not found" },
-        { status: 404 }
-      );
+    if (unitId) {
+      unit = await prisma.unit.findUnique({
+        where: { id: unitId },
+        include: { property: true },
+      });
+      if (!unit || unit.property.organizationId !== ctx.organizationId) {
+        return NextResponse.json({ error: "Unit not found" }, { status: 404 });
+      }
     }
 
-    // Build replacement map - only the essential variables that change per lease
+    // Build replacement map
     const parsedRentAmount = parseFloat(rentAmount);
     const parsedSecurityDeposit = parseFloat(securityDeposit);
     const start = new Date(startDate);
     const end = endDate ? new Date(endDate) : null;
-    const fullAddress = `${unit.property.address}, ${unit.property.city}, ${unit.property.state} ${unit.property.zip}`;
+    const fullAddress = unit
+      ? `${unit.property.address}, ${unit.property.city}, ${unit.property.state} ${unit.property.zip}`
+      : "_____________________________________";
 
     // Map state abbreviations to full names
     const stateNames: Record<string, string> = {
@@ -96,25 +99,42 @@ export async function POST(request: NextRequest) {
       // Add more as needed
     };
 
+    // Build lease term section based on fixed-term vs month-to-month
+    const isMonthToMonth = monthToMonth === true;
+    const leaseTermSection = isMonthToMonth
+      ? `### 1.1 Month-to-Month Tenancy
+This Agreement shall create a month-to-month periodic tenancy commencing on the Start Date, continuing from month to month until terminated by either party in accordance with the provisions herein.
+
+### 1.2 Termination by Tenant
+Either party may terminate this Agreement by delivering written notice of not less than thirty (30) days prior to the intended date of termination. Such termination shall not become effective until the last day of the monthly rental period in which the thirty-day notice period expires. By way of illustration, should notice be delivered on the fifth (5th) day of a given month, the minimum thirty-day period would expire on the fifth (5th) day of the following month; as such expiration date falls within a subsequent rental period, termination shall not take effect until the final day of that subsequent month. Tenant shall remain liable for the full amount of rent and all obligations under this Agreement through the effective date of termination.`
+      : `### 1.1 Fixed Term
+This Agreement is for a fixed term ending on the End Date.
+
+### 1.2 Early Termination by Tenant
+Tenant may terminate early with at least 30 days' written notice and remains responsible for rent until a replacement tenant begins paying rent or through the End Date, whichever occurs first. Lessor may charge an early termination fee equal to one month's rent. Personal reasons (e.g., financial hardship, job relocation, housemate disputes) do not relieve Tenant of obligations unless Lessor agrees in writing.`;
+
     const replacements: Record<string, string> = {
       // Lessor name
       LESSOR_NAME: lessorName,
 
       // Property/Unit
       PROPERTY_ADDRESS: fullAddress,
-      ROOM_NUMBER: unit.name,
+      ROOM_NUMBER: unit?.name || "___________",
 
       // Lease dates
       LEASE_START_DATE: formatDate(start),
-      LEASE_END_DATE: end ? formatDate(end) : "Month-to-month",
+      LEASE_END_DATE: isMonthToMonth ? "Month-to-month" : (end ? formatDate(end) : "Month-to-month"),
+
+      // Lease term section (fixed vs month-to-month)
+      LEASE_TERM_SECTION: leaseTermSection,
 
       // Payment terms
       MONTHLY_RENT: `$${parsedRentAmount.toFixed(2)} (${numberToWords(parsedRentAmount)})`,
       SECURITY_DEPOSIT: `$${parsedSecurityDeposit.toFixed(2)} (${numberToWords(parsedSecurityDeposit)})`,
 
       // Governing law (varies by property location)
-      STATE_NAME: stateNames[unit.property.state] || unit.property.state,
-      COUNTY_NAME: unit.property.jurisdiction?.replace(" County", "") || "Durham",
+      STATE_NAME: unit ? (stateNames[unit.property.state] || unit.property.state) : "___________",
+      COUNTY_NAME: unit ? (unit.property.jurisdiction?.replace(" County", "") || "Durham") : "___________",
 
       // Custom fields can override any of the above
       ...(customFields || {}),
@@ -144,15 +164,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Determine version
-    const previousLeases = await prisma.lease.count({
-      where: { tenantId, unitId },
-    });
+    const previousLeases = tenantId && unitId
+      ? await prisma.lease.count({ where: { tenantId, unitId } })
+      : 0;
 
     // Create the lease
     const lease = await prisma.lease.create({
       data: {
-        tenantId,
-        unitId,
+        tenantId: tenantId || null,
+        unitId: unitId || null,
         templateId,
         content,
         rentAmount: parsedRentAmount,
@@ -188,8 +208,8 @@ export async function POST(request: NextRequest) {
         action: "CREATED",
         version: lease.version,
       },
-      tenantId: lease.tenantId,
-      propertyId: lease.unit.propertyId,
+      tenantId: lease.tenantId || undefined,
+      propertyId: lease.unit?.propertyId || undefined,
     });
 
     // Return lease with clauses

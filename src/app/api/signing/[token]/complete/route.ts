@@ -27,6 +27,7 @@ export async function POST(
           include: {
             tenant: true,
             unit: { include: { property: true } },
+            signingTokens: true, // Need all tokens to check if everyone signed
           },
         },
       },
@@ -60,6 +61,13 @@ export async function POST(
       );
     }
 
+    if (!signingToken.lease.tenant || !signingToken.lease.tenantId || !signingToken.lease.unit) {
+      return NextResponse.json(
+        { error: "Lease is missing tenant or unit" },
+        { status: 400 }
+      );
+    }
+
     // Capture request metadata
     const ipAddress =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -73,40 +81,19 @@ export async function POST(
       day: "numeric",
     });
 
-    // Generate PDF with tenant signature baked in
-    const pdfBuffer = await generateLeasePdfBuffer(
-      signingToken.lease,
-      { name: fullName, signatureDataUrl, date: signedDate }
-    );
-
-    // Save signed PDF to filesystem
-    const signedDocumentPath = await saveSignedDocument(
-      signingToken.lease.id,
-      pdfBuffer
-    );
-
-    // Update signing token
+    // Update this signing token — mark as used and store signature
     await prisma.signingToken.update({
       where: { id: signingToken.id },
       data: {
         usedAt: new Date(),
         ipAddress,
         userAgent,
+        signatureDataUrl,
       },
     });
 
-    // Update lease to ACTIVE
-    await prisma.lease.update({
-      where: { id: signingToken.lease.id },
-      data: {
-        status: "ACTIVE",
-        signedAt: new Date(),
-        signedDocumentUrl: signedDocumentPath,
-      },
-    });
-
-    // Update tenant SMS consent if opted in
-    if (smsConsent) {
+    // Update tenant SMS consent if tenant is signing and opted in
+    if (smsConsent && signingToken.signerRole === "TENANT") {
       await prisma.tenant.update({
         where: { id: signingToken.lease.tenantId },
         data: {
@@ -116,7 +103,7 @@ export async function POST(
       });
     }
 
-    // Log event
+    // Log signing event
     await createEvent({
       type: "LEASE",
       payload: {
@@ -130,7 +117,76 @@ export async function POST(
       propertyId: signingToken.lease.unit.propertyId,
     });
 
-    return NextResponse.json({ success: true, leaseId: signingToken.lease.id });
+    // Check if ALL signers have now signed
+    const allTokens = signingToken.lease.signingTokens;
+    const unsignedCount = allTokens.filter(
+      (t) => !t.usedAt && t.id !== signingToken.id // Exclude current (just marked as used above)
+    ).length;
+
+    if (unsignedCount > 0) {
+      // Still waiting for other signers
+      return NextResponse.json({
+        success: true,
+        leaseId: signingToken.lease.id,
+        allSigned: false,
+        remainingSigners: unsignedCount,
+        message: `Signature recorded. Waiting for ${unsignedCount} more signer(s) to complete.`,
+      });
+    }
+
+    // All signers have signed — generate final PDF with all signatures and activate lease
+    // Reload all tokens to get stored signatures
+    const completedTokens = await prisma.signingToken.findMany({
+      where: { leaseId: signingToken.lease.id },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Find tenant signature (primary signer for PDF)
+    const tenantToken = completedTokens.find((t) => t.signerRole === "TENANT");
+    const guarantorTokens = completedTokens.filter((t) => t.signerRole === "GUARANTOR");
+
+    // Generate PDF with tenant signature
+    const tenantSignature = tenantToken?.signatureDataUrl
+      ? { name: tenantToken.signerName, signatureDataUrl: tenantToken.signatureDataUrl, date: signedDate }
+      : { name: fullName, signatureDataUrl, date: signedDate };
+
+    // Build guarantor signatures for the PDF
+    const guarantorSignatures = guarantorTokens.map((gt) => ({
+      name: gt.signerName,
+      signatureDataUrl: gt.signatureDataUrl || "",
+      date: gt.usedAt
+        ? gt.usedAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+        : signedDate,
+    }));
+
+    const pdfBuffer = await generateLeasePdfBuffer(
+      signingToken.lease,
+      tenantSignature,
+      guarantorSignatures.length > 0 ? guarantorSignatures : undefined
+    );
+
+    // Save signed PDF
+    const signedDocumentPath = await saveSignedDocument(
+      signingToken.lease.id,
+      pdfBuffer
+    );
+
+    // Activate lease
+    await prisma.lease.update({
+      where: { id: signingToken.lease.id },
+      data: {
+        status: "ACTIVE",
+        signedAt: new Date(),
+        signedDocumentUrl: signedDocumentPath,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      leaseId: signingToken.lease.id,
+      allSigned: true,
+      message: "All parties have signed. Lease is now active.",
+    });
   } catch (error) {
     console.error("Failed to complete signing:", error);
     return NextResponse.json(

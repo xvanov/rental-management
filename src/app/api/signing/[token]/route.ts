@@ -50,9 +50,17 @@ export async function GET(
 
     const { lease } = signingToken;
 
+    if (!lease.unit) {
+      return NextResponse.json(
+        { error: "Lease is missing unit" },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json({
       signerName: signingToken.signerName,
       signerEmail: signingToken.signerEmail,
+      signerRole: signingToken.signerRole || "TENANT",
       leaseContent: lease.content,
       propertyAddress: `${lease.unit.property.address}, ${lease.unit.property.city}, ${lease.unit.property.state} ${lease.unit.property.zip}`,
       unitName: lease.unit.name,

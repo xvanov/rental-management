@@ -5,25 +5,39 @@ import fs from "fs";
 import path from "path";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ leaseId: string }> }
 ) {
   try {
-    const ctx = await getAuthContext();
-    if (ctx instanceof NextResponse) return ctx;
-
     const { leaseId } = await params;
+    const { searchParams } = new URL(request.url);
+    const token = searchParams.get("token");
+
+    let authorized = false;
+
+    if (token) {
+      // Public access via signing token — only if the token was used (person signed)
+      const signingToken = await prisma.signingToken.findFirst({
+        where: { leaseId, token, usedAt: { not: null } },
+      });
+      if (signingToken) authorized = true;
+    } else {
+      // Admin access via auth
+      const ctx = await getAuthContext();
+      if (!(ctx instanceof NextResponse)) authorized = true;
+    }
+
+    if (!authorized) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const lease = await prisma.lease.findUnique({
       where: { id: leaseId },
       include: { tenant: true, unit: { include: { property: true } } },
     });
 
-    if (!lease || lease.unit.property.organizationId !== ctx.organizationId) {
-      return NextResponse.json(
-        { error: "Lease not found" },
-        { status: 404 }
-      );
+    if (!lease) {
+      return NextResponse.json({ error: "Lease not found" }, { status: 404 });
     }
 
     if (!lease.signedDocumentUrl) {
@@ -43,11 +57,13 @@ export async function GET(
     }
 
     const fileBuffer = fs.readFileSync(filePath);
+    const tenantName = lease.tenant?.lastName || "tenant";
+    const unitName = lease.unit?.name || "lease";
 
     return new NextResponse(new Uint8Array(fileBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="signed-lease-${lease.tenant.lastName}-${lease.unit.name}.pdf"`,
+        "Content-Disposition": `inline; filename="signed-lease-${tenantName}-${unitName}.pdf"`,
       },
     });
   } catch (error) {
