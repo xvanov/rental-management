@@ -99,6 +99,9 @@ export async function createListingPost({
       if (photoResponse.ok) {
         const photoData = await photoResponse.json();
         photoIds.push(photoData.id);
+      } else {
+        const errorData = await photoResponse.json().catch(() => ({}));
+        console.error(`Failed to upload photo ${photoUrl}:`, errorData.error?.message ?? photoResponse.statusText);
       }
     }
 
@@ -609,7 +612,7 @@ export interface CreateListingAdOptions {
   city: string;
   /** State for geo-targeting */
   state: string;
-  /** Daily budget in dollars (minimum $5) */
+  /** Daily budget in dollars (minimum $1) */
   dailyBudgetDollars?: number;
   /** Number of days to run the ad */
   durationDays?: number;
@@ -703,6 +706,9 @@ export async function createListingAd({
       optimization_goal: "REACH",
       bid_strategy: "LOWEST_COST_WITHOUT_CAP",
       targeting: JSON.stringify(targeting),
+      // Restrict to Facebook only — no Instagram (avoids needing a linked IG account)
+      publisher_platforms: JSON.stringify(["facebook"]),
+      facebook_positions: JSON.stringify(["feed", "marketplace"]),
       status: campaignStatus,
     });
     adSetId = adSetRes.id;

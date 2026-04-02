@@ -166,7 +166,7 @@ export function PublishDialog({
                     <Input
                       id="ad-budget"
                       type="number"
-                      min={5}
+                      min={1}
                       value={adBudget}
                       onChange={(e) => setAdBudget(e.target.value)}
                     />

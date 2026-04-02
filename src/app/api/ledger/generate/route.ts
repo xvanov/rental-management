@@ -71,7 +71,7 @@ async function generateRentCharges(organizationId: string, periodOverride?: stri
   const results: Array<{ tenantId: string; tenantName: string; amount: number; status: string }> = [];
 
   for (const lease of activeLeases) {
-    if (!lease.tenant) continue;
+    if (!lease.tenant || !lease.tenantId) continue;
 
     // Check if rent already charged for this period
     const existingRent = await prisma.ledgerEntry.findFirst({
@@ -160,7 +160,7 @@ async function applyLateFees(organizationId: string, periodOverride?: string) {
   const results: Array<{ tenantId: string; tenantName: string; feeAmount: number; status: string }> = [];
 
   for (const lease of activeLeases) {
-    if (!lease.tenant) continue;
+    if (!lease.tenant || !lease.tenantId) continue;
 
     // Get late fee and grace period from lease clauses
     const lateFeeClause = lease.clauses.find((c) => c.type === "LATE_FEE");

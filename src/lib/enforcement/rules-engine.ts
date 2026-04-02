@@ -67,7 +67,7 @@ export async function evaluateEnforcementRules(
   for (const lease of activeLeases) {
     if (!lease.tenant || !lease.unit) continue;
 
-    const context = buildEnforcementContext(lease);
+    const context = buildEnforcementContext(lease as typeof lease & { tenant: NonNullable<typeof lease.tenant>; unit: NonNullable<typeof lease.unit> });
     if (!context) continue;
 
     // Check if rent reminders are needed (3 days before and 1 day before)

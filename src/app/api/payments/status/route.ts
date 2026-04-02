@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     const results: TenantPaymentStatus[] = [];
 
     for (const lease of activeLeases) {
-      if (!lease.tenant || !lease.unit) continue;
+      if (!lease.tenant || !lease.tenantId || !lease.unit) continue;
 
       const rentAmount = lease.rentAmount || 0;
       if (rentAmount <= 0) continue;
