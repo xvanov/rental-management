@@ -63,3 +63,4 @@ start.log
 # BMAD workflow files (installed via npm)
 _bmad/
 _bmad-output/
+scripts/duke-energy/.next/
