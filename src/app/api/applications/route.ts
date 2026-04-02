@@ -29,8 +29,14 @@ export async function GET(request: NextRequest) {
     const ctx = await getAuthContext();
     if (ctx instanceof NextResponse) return ctx;
 
+    // Show applications that are:
+    // 1. Linked to a tenant in this org, OR
+    // 2. Not linked to any tenant (standalone public applications)
     const where: Record<string, unknown> = {
-      tenant: { unit: { property: { organizationId: ctx.organizationId } } },
+      OR: [
+        { tenant: { unit: { property: { organizationId: ctx.organizationId } } } },
+        { tenantId: null },
+      ],
     };
     if (status) where.status = status;
 
@@ -141,11 +147,18 @@ export async function PATCH(request: NextRequest) {
     if (formData.email !== undefined) updateData.email = formData.email;
     if (formData.phone !== undefined) updateData.phone = formData.phone;
     if (formData.currentAddress !== undefined) updateData.currentAddress = formData.currentAddress;
+    if (formData.moveInDate !== undefined) updateData.moveInDate = formData.moveInDate;
+    if (formData.incomeSource !== undefined) updateData.incomeSource = formData.incomeSource;
+    if (formData.incomeDetails !== undefined) updateData.incomeDetails = formData.incomeDetails;
     if (formData.employer !== undefined) updateData.employer = formData.employer;
     if (formData.income !== undefined) updateData.income = formData.income ? parseFloat(formData.income) : null;
+    if (formData.vehicles !== undefined) updateData.vehicles = formData.vehicles;
     if (formData.rentalHistory !== undefined) updateData.rentalHistory = formData.rentalHistory;
     if (formData.evictionHistory !== undefined) updateData.evictionHistory = formData.evictionHistory;
+    if (formData.idDocument !== undefined) updateData.idDocument = formData.idDocument;
+    if (formData.financialDocuments !== undefined) updateData.financialDocuments = formData.financialDocuments;
     if (formData.documents !== undefined) updateData.documents = formData.documents;
+    if (formData.backgroundCheckConsent !== undefined) updateData.backgroundCheckConsent = formData.backgroundCheckConsent;
 
     // Status changes (review actions)
     if (status) {

@@ -17,6 +17,11 @@ import {
   Mail,
   Briefcase,
   Home,
+  Download,
+  Car,
+  ShieldCheck,
+  Calendar,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,8 +54,12 @@ interface Application {
   email: string | null;
   phone: string | null;
   currentAddress: string | null;
+  moveInDate: string | null;
+  incomeSource: string | null;
+  incomeDetails: string | null;
   employer: string | null;
   income: number | null;
+  vehicles: Array<{ make: string; model: string; year: string; color: string; licensePlate: string }> | null;
   rentalHistory: Array<{
     address: string;
     landlordName: string;
@@ -59,7 +68,10 @@ interface Application {
     reasonForLeaving: string;
   }> | null;
   evictionHistory: { hasEviction: boolean; details: string } | null;
-  documents: Array<{ name: string; type: string; size: number }> | null;
+  idDocument: { name: string; type: string; size: number; dataUrl: string } | null;
+  financialDocuments: Array<{ name: string; type: string; size: number; dataUrl: string }> | null;
+  documents: Array<{ name: string; type: string; size: number; dataUrl?: string }> | null;
+  backgroundCheckConsent: boolean;
   submittedAt: string | null;
   reviewedAt: string | null;
   reviewNotes: string | null;
@@ -455,25 +467,104 @@ export default function ApplicationsPage() {
                       <p>{selectedApp.currentAddress}</p>
                     </div>
                   )}
+                  {selectedApp.moveInDate && (
+                    <div>
+                      <span className="text-muted-foreground">Intended Move-In:</span>
+                      <p>{new Date(selectedApp.moveInDate).toLocaleDateString()}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Employment */}
+              {/* Government ID */}
+              {selectedApp.idDocument && (
+                <div className="rounded-lg border p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
+                    <CreditCard className="size-4" /> Government ID
+                  </h4>
+                  <div className="flex items-center gap-3 text-sm">
+                    <FileText className="size-4 text-muted-foreground shrink-0" />
+                    <span className="font-medium">{(selectedApp.idDocument as {name: string}).name}</span>
+                    <span className="text-muted-foreground">
+                      ({((selectedApp.idDocument as {size: number}).size / 1024).toFixed(0)} KB)
+                    </span>
+                    {(selectedApp.idDocument as {dataUrl?: string}).dataUrl && (
+                      <a
+                        href={(selectedApp.idDocument as {dataUrl: string}).dataUrl}
+                        download={(selectedApp.idDocument as {name: string}).name}
+                        className="text-blue-600 hover:underline text-xs flex items-center gap-1"
+                      >
+                        <Download className="size-3" /> Download
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Income & Finances */}
               <div className="rounded-lg border p-4">
                 <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
-                  <Briefcase className="size-4" /> Employment & Income
+                  <Briefcase className="size-4" /> Income & Finances
                 </h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <span className="text-muted-foreground">Employer:</span>
-                    <p>{selectedApp.employer || "-"}</p>
+                    <span className="text-muted-foreground">Source of Income:</span>
+                    <p>{selectedApp.incomeSource || selectedApp.employer || "-"}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Monthly Income:</span>
                     <p>{selectedApp.income ? `$${selectedApp.income.toLocaleString()}` : "-"}</p>
                   </div>
+                  {selectedApp.incomeDetails && (
+                    <div className="col-span-2">
+                      <span className="text-muted-foreground">Details:</span>
+                      <p>{selectedApp.incomeDetails}</p>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Financial Documents */}
+              {selectedApp.financialDocuments && (selectedApp.financialDocuments as Array<{name: string}>).length > 0 && (
+                <div className="rounded-lg border p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
+                    <FileText className="size-4" /> Financial Documents (Proof of Income)
+                  </h4>
+                  <div className="grid gap-2">
+                    {(selectedApp.financialDocuments as Array<{name: string; type: string; size: number; dataUrl?: string}>).map((doc, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm">
+                        <FileText className="size-3 text-muted-foreground shrink-0" />
+                        <span>{doc.name}</span>
+                        <span className="text-muted-foreground">
+                          ({(doc.size / 1024).toFixed(0)} KB)
+                        </span>
+                        {doc.dataUrl && (
+                          <a href={doc.dataUrl} download={doc.name} className="text-blue-600 hover:underline text-xs flex items-center gap-1">
+                            <Download className="size-3" /> Download
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Vehicles */}
+              {selectedApp.vehicles && (selectedApp.vehicles as Array<{make: string}>).length > 0 && (
+                <div className="rounded-lg border p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
+                    <Car className="size-4" /> Vehicles ({(selectedApp.vehicles as Array<{make: string}>).length})
+                  </h4>
+                  <div className="grid gap-2">
+                    {(selectedApp.vehicles as Array<{make: string; model: string; year: string; color: string; licensePlate: string}>).map((v, i) => (
+                      <div key={i} className="text-sm border-l-2 pl-3">
+                        <p className="font-medium">{v.year} {v.make} {v.model} ({v.color})</p>
+                        <p className="text-muted-foreground">License Plate: <strong>{v.licensePlate}</strong></p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Rental History */}
               {selectedApp.rentalHistory && (selectedApp.rentalHistory as Array<{address: string}>).length > 0 && (
@@ -509,20 +600,35 @@ export default function ApplicationsPage() {
                 </div>
               )}
 
-              {/* Documents */}
+              {/* Background Check Consent */}
+              <div className="rounded-lg border p-4">
+                <h4 className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <ShieldCheck className="size-4" /> Background & Credit Check
+                </h4>
+                <p className="text-sm">
+                  {selectedApp.backgroundCheckConsent
+                    ? <span className="text-green-600 font-medium">Consent given</span>
+                    : <span className="text-red-600 font-medium">No consent</span>}
+                </p>
+              </div>
+
+              {/* Legacy Documents (for old applications) */}
               {selectedApp.documents && (selectedApp.documents as Array<{name: string}>).length > 0 && (
                 <div className="rounded-lg border p-4">
                   <h4 className="flex items-center gap-2 text-sm font-medium mb-3">
-                    <FileText className="size-4" /> Documents
+                    <FileText className="size-4" /> Other Documents
                   </h4>
                   <div className="grid gap-2">
-                    {(selectedApp.documents as Array<{name: string; type: string; size: number}>).map((doc, i) => (
+                    {(selectedApp.documents as Array<{name: string; type: string; size: number; dataUrl?: string}>).map((doc, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm">
-                        <FileText className="size-3 text-muted-foreground" />
+                        <FileText className="size-3 text-muted-foreground shrink-0" />
                         <span>{doc.name}</span>
-                        <span className="text-muted-foreground">
-                          ({(doc.size / 1024).toFixed(1)} KB)
-                        </span>
+                        <span className="text-muted-foreground">({(doc.size / 1024).toFixed(0)} KB)</span>
+                        {doc.dataUrl && (
+                          <a href={doc.dataUrl} download={doc.name} className="text-blue-600 hover:underline text-xs flex items-center gap-1">
+                            <Download className="size-3" /> Download
+                          </a>
+                        )}
                       </div>
                     ))}
                   </div>
