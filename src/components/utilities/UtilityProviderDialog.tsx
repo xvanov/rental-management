@@ -57,6 +57,7 @@ export interface UtilityBill {
 
 export interface UtilityProviderConfig {
   name: string;
+  slug: string; // e.g., "duke-energy" — used for background job API
   type: "water" | "electric" | "gas" | "internet";
   apiEndpoint: string;
   icon: React.ReactNode;
@@ -69,6 +70,7 @@ interface UtilityProviderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onImportComplete?: () => void;
+  onJobStarted?: () => void;
 }
 
 export function UtilityProviderDialog({
@@ -76,6 +78,7 @@ export function UtilityProviderDialog({
   open,
   onOpenChange,
   onImportComplete,
+  onJobStarted,
 }: UtilityProviderDialogProps) {
   const [loading, setLoading] = useState(false);
   const [bills, setBills] = useState<UtilityBill[]>([]);
@@ -84,6 +87,7 @@ export function UtilityProviderDialog({
   const [importing, setImporting] = useState(false);
   const [mode, setMode] = useState<"parse" | "fetch">("parse");
   const [source, setSource] = useState<"stored" | "parsed" | null>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
 
   const getServiceLocation = (bill: UtilityBill) =>
     bill.service_location || bill.service_address || "Unknown";
@@ -111,29 +115,28 @@ export function UtilityProviderDialog({
     }
   }, [config.apiEndpoint]);
 
+  // Auto-load stored bills when dialog opens — only once per open
   useEffect(() => {
-    if (open && bills.length === 0 && attentionBills.length === 0) {
+    if (open && !initialLoaded) {
+      setInitialLoaded(true);
       loadStoredBills();
     }
-  }, [open, bills.length, attentionBills.length, loadStoredBills]);
+    if (!open) {
+      setInitialLoaded(false);
+    }
+  }, [open, initialLoaded, loadStoredBills]);
 
-  const handleFetch = async (fetchMode: "parse" | "fetch") => {
+  const handleParse = async () => {
     setLoading(true);
     setError(null);
-    setBills([]);
-    setAttentionBills([]);
-    setMode(fetchMode);
+    setMode("parse");
 
     try {
-      const url = fetchMode === "parse"
-        ? `${config.apiEndpoint}?parseOnly=true`
-        : config.apiEndpoint;
-
-      const res = await fetch(url);
+      const res = await fetch(`${config.apiEndpoint}?parseOnly=true`);
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || `Failed to fetch ${config.name} bills`);
+        setError(data.error || `Failed to parse ${config.name} bills`);
         return;
       }
 
@@ -142,18 +145,45 @@ export function UtilityProviderDialog({
       setSource(data.source || "parsed");
 
       if ((data.bills?.length || 0) === 0 && (data.attention_required?.length || 0) === 0) {
-        if (fetchMode === "parse") {
-          setError(
-            `No PDF bills found. Use 'Download from Portal' to fetch bills from the ${config.name} website, or manually place PDF files in the download directory.`
-          );
-        } else {
-          setError(
-            `No bills were downloaded. Check that ${config.credentialsEnvPrefix}_USER and ${config.credentialsEnvPrefix}_PASS are set in your environment.`
-          );
-        }
+        setError(
+          `No PDF bills found. Use 'Download from Portal' to fetch bills from the ${config.name} website.`
+        );
       }
     } catch {
       setError(`Failed to connect to ${config.name} service`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadFromPortal = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/utilities/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: config.slug }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 409) {
+        setError(`A ${config.name} scraper is already running. Check Scraper Jobs for progress.`);
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.error || `Failed to start ${config.name} scraper`);
+        return;
+      }
+
+      // Job started — close dialog so user can continue working
+      onOpenChange(false);
+      onJobStarted?.();
+    } catch {
+      setError(`Failed to start ${config.name} scraper`);
     } finally {
       setLoading(false);
     }
@@ -229,7 +259,7 @@ export function UtilityProviderDialog({
               Load Stored
             </Button>
             <Button
-              onClick={() => handleFetch("parse")}
+              onClick={handleParse}
               disabled={loading}
               variant="outline"
               size="sm"
@@ -242,22 +272,18 @@ export function UtilityProviderDialog({
               Parse Local PDFs
             </Button>
             <Button
-              onClick={() => handleFetch("fetch")}
+              onClick={handleDownloadFromPortal}
               disabled={loading}
               size="sm"
             >
-              {loading && mode === "fetch" ? (
-                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
+              <Download className="mr-2 h-4 w-4" />
               Download from Portal
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
             <strong>Load Stored:</strong> View previously parsed bills from database.{" "}
             <strong>Parse Local PDFs:</strong> Re-parse PDFs in download directory.{" "}
-            <strong>Download from Portal:</strong> Fetch latest bills from {config.name} website (requires credentials).
+            <strong>Download from Portal:</strong> Starts a background job to fetch latest bills (2-5 min). Check Scraper Jobs for progress.
           </p>
 
           {error && (
@@ -393,6 +419,7 @@ export function UtilityProviderDialog({
 // Pre-configured providers
 export const DURHAM_WATER_CONFIG: UtilityProviderConfig = {
   name: "Durham Water",
+  slug: "durham-water",
   type: "water",
   apiEndpoint: "/api/utilities/durham-water",
   icon: <Droplets className="h-5 w-5" />,
@@ -402,6 +429,7 @@ export const DURHAM_WATER_CONFIG: UtilityProviderConfig = {
 
 export const DUKE_ENERGY_CONFIG: UtilityProviderConfig = {
   name: "Duke Energy",
+  slug: "duke-energy",
   type: "electric",
   apiEndpoint: "/api/utilities/duke-energy",
   icon: <Zap className="h-5 w-5" />,
@@ -411,6 +439,7 @@ export const DUKE_ENERGY_CONFIG: UtilityProviderConfig = {
 
 export const ENBRIDGE_GAS_CONFIG: UtilityProviderConfig = {
   name: "Enbridge Gas",
+  slug: "enbridge-gas",
   type: "gas",
   apiEndpoint: "/api/utilities/enbridge-gas",
   icon: <Flame className="h-5 w-5" />,
@@ -420,6 +449,7 @@ export const ENBRIDGE_GAS_CONFIG: UtilityProviderConfig = {
 
 export const WAKE_ELECTRIC_CONFIG: UtilityProviderConfig = {
   name: "Wake Electric",
+  slug: "wake-electric",
   type: "electric",
   apiEndpoint: "/api/utilities/wake-electric",
   icon: <Zap className="h-5 w-5" />,
@@ -429,6 +459,7 @@ export const WAKE_ELECTRIC_CONFIG: UtilityProviderConfig = {
 
 export const GRAHAM_UTILITIES_CONFIG: UtilityProviderConfig = {
   name: "Graham Utilities",
+  slug: "graham-utilities",
   type: "water",
   apiEndpoint: "/api/utilities/graham-utilities",
   icon: <Droplets className="h-5 w-5" />,
@@ -438,6 +469,7 @@ export const GRAHAM_UTILITIES_CONFIG: UtilityProviderConfig = {
 
 export const SMUD_CONFIG: UtilityProviderConfig = {
   name: "SMUD",
+  slug: "smud",
   type: "electric",
   apiEndpoint: "/api/utilities/smud",
   icon: <Zap className="h-5 w-5" />,
@@ -447,6 +479,7 @@ export const SMUD_CONFIG: UtilityProviderConfig = {
 
 export const SPECTRUM_CONFIG: UtilityProviderConfig = {
   name: "Spectrum",
+  slug: "spectrum",
   type: "internet",
   apiEndpoint: "/api/utilities/spectrum",
   icon: <Wifi className="h-5 w-5" />,
@@ -456,6 +489,7 @@ export const SPECTRUM_CONFIG: UtilityProviderConfig = {
 
 export const XFINITY_CONFIG: UtilityProviderConfig = {
   name: "Xfinity",
+  slug: "xfinity",
   type: "internet",
   apiEndpoint: "/api/utilities/xfinity",
   icon: <Wifi className="h-5 w-5" />,

@@ -49,15 +49,19 @@ class SmudBillData:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
+        def _date(v):
+            if v is None: return None
+            return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
         return {
             "document_type": self.document_type.value,
             "account_number": self.account_number,
             "service_address": self.service_address,
-            "bill_date": self.bill_date.isoformat() if self.bill_date else None,
-            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "bill_date": _date(self.bill_date),
+            "due_date": _date(self.due_date),
             "amount_due": self.amount_due,
-            "billing_period_start": self.billing_period_start.isoformat() if self.billing_period_start else None,
-            "billing_period_end": self.billing_period_end.isoformat() if self.billing_period_end else None,
+            "billing_period_start": _date(self.billing_period_start),
+            "billing_period_end": _date(self.billing_period_end),
             "billing_days": self.billing_days,
             "kwh_used": self.kwh_used,
             "meter_number": self.meter_number,

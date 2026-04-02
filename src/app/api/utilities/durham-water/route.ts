@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { DurhamWaterDocType } from "@/generated/prisma/client";
-import { exec } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { runScraper } from "@/lib/utilities/scraper-runner";
 import {
   getAddressToPropertyMap,
   matchPropertyId,
 } from "@/lib/utilities/address-matching";
-
-const execAsync = promisify(exec);
 
 interface DurhamWaterBill {
   document_type: "bill" | "delinquency_notice" | "unknown";
@@ -182,9 +179,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const projectRoot = process.cwd();
-    const scriptPath = path.join(projectRoot, "scripts", "durham-water", "main.py");
-    const outputDir = path.join(projectRoot, "data", "downloaded-bills");
+    const outputDir = path.join(process.cwd(), "data", "downloaded-bills");
 
     // Ensure output directory exists
     await fs.mkdir(outputDir, { recursive: true });
@@ -209,53 +204,17 @@ export async function GET(req: NextRequest) {
       args.push("--parse-only");
     }
 
-    // Run the Python scraper using the virtual environment
-    const venvPython = path.join(projectRoot, "scripts", "durham-water", ".venv", "bin", "python");
+    const result = await runScraper({
+      scraperName: "durham-water",
+      args,
+      outputFile,
+    });
 
-    try {
-      const { stderr } = await execAsync(
-        `${venvPython} ${scriptPath} ${args.join(" ")}`,
-        {
-          cwd: path.join(projectRoot, "scripts", "durham-water"),
-          timeout: 300000, // 5 minute timeout
-          env: {
-            ...process.env,
-            PYTHONPATH: path.join(projectRoot, "scripts", "durham-water"),
-            PLAYWRIGHT_BROWSERS_PATH: path.join(projectRoot, "scripts", "durham-water", ".cache", "ms-playwright"),
-          },
-        }
+    if (!result.success) {
+      return NextResponse.json(
+        { error: "Failed to run Durham Water scraper", details: result.error },
+        { status: 500 }
       );
-
-      if (stderr && !stderr.includes("DevTools")) {
-        console.warn("Scraper stderr:", stderr);
-      }
-    } catch (execError: unknown) {
-      const error = execError as { code?: number; stderr?: string; message?: string };
-      console.error("Scraper execution error:", error);
-
-      // Check for specific error types
-      const stderr = error.stderr || "";
-      if (stderr.includes("playwright install") || stderr.includes("Executable doesn't exist")) {
-        return NextResponse.json(
-          {
-            error: "Playwright browsers not installed. Run 'playwright install' in the scripts/durham-water/.venv to enable portal downloads.",
-            details: "The scraper requires Playwright browsers to log into the Durham Water portal.",
-          },
-          { status: 500 }
-        );
-      }
-
-      try {
-        await fs.access(outputFile);
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Failed to run Durham Water scraper",
-            details: error.stderr || error.message,
-          },
-          { status: 500 }
-        );
-      }
     }
 
     // Read results

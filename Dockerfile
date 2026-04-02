@@ -22,43 +22,60 @@ ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 RUN mkdir -p public
 RUN npm run build
 
-# Stage 3: Production runner
-FROM node:20-alpine AS runner
+# Stage 3: Production runner (Debian-slim for glibc — needed by Playwright)
+FROM node:20-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install Chromium and dependencies for Puppeteer PDF generation
-RUN apk add --no-cache \
+# Install system dependencies for Chromium (Puppeteer PDF gen) and Python (scrapers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
-    nss \
-    freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont
+    fonts-freefont-ttf \
+    python3 \
+    python3-venv \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Set up Python virtual environment for utility scrapers
+RUN python3 -m venv /app/scraper-venv
+RUN /app/scraper-venv/bin/pip install --no-cache-dir \
+    playwright>=1.40.0 \
+    pdfplumber>=0.10.0 \
+    python-dotenv>=1.0.0 \
+    requests>=2.31.0 \
+    imapclient>=2.3.0
+
+# Install Playwright Chromium browser
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/scraper-browsers
+RUN /app/scraper-venv/bin/playwright install --with-deps chromium
+
+# Use the existing 'node' user (uid 1000) from the base image
+# This matches the host volume owner for correct permissions
 
 # Copy standalone build output
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 
 # Copy Prisma client (needed at runtime)
 COPY --from=builder /app/src/generated ./src/generated
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
-# Create data directory for signed documents
-RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+# Copy utility scraper scripts
+COPY --from=builder --chown=node:node /app/scripts ./scripts
 
-USER nextjs
+# Create data directories for signed documents, bills, and media
+RUN mkdir -p /app/data/downloaded-bills /app/data/signed-leases /app/data/message-media /app/data/bills \
+    && chown -R node:node /app/data
+RUN chown -R node:node /app/scraper-venv /app/scraper-browsers
+
+USER node
 
 EXPOSE 3000
 ENV PORT=3000

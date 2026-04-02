@@ -9,15 +9,22 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const propertyId = searchParams.get("propertyId");
+    const period = searchParams.get("period"); // Exact month filter (YYYY-MM)
     const months = parseInt(searchParams.get("months") || "6");
 
-    // Calculate the start period (N months ago)
-    const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
-    const startPeriod = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}`;
+    // If a specific period is requested, filter to that exact month.
+    // Otherwise, use the rolling N-months window for aggregate views.
+    let periodFilter: string | { gte: string };
+    if (period) {
+      periodFilter = period;
+    } else {
+      const now = new Date();
+      const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+      periodFilter = { gte: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}` };
+    }
 
-    const where: { propertyId?: string; period?: { gte: string }; property?: { organizationId: string } } = {
-      period: { gte: startPeriod },
+    const where: { propertyId?: string; period?: string | { gte: string }; property?: { organizationId: string } } = {
+      period: periodFilter,
       property: { organizationId: ctx.organizationId },
     };
     if (propertyId) where.propertyId = propertyId;
@@ -85,7 +92,7 @@ export async function GET(req: NextRequest) {
     const tenantCharges = await prisma.ledgerEntry.findMany({
       where: {
         type: "UTILITY",
-        period: { gte: startPeriod },
+        period: periodFilter as string | { gte: string },
         tenant: {
           unit: {
             property: { organizationId: ctx.organizationId },

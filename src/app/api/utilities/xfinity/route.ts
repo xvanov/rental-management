@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { XfinityDocType } from "@/generated/prisma/client";
-import { exec } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { runScraper } from "@/lib/utilities/scraper-runner";
 import {
   getAddressToPropertyMap,
   matchPropertyId,
 } from "@/lib/utilities/address-matching";
-
-const execAsync = promisify(exec);
 
 interface XfinityBill {
   document_type: "bill" | "disconnect_notice" | "unknown";
@@ -176,9 +173,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const projectRoot = process.cwd();
-    const scriptPath = path.join(projectRoot, "scripts", "xfinity", "main.py");
-    const outputDir = path.join(projectRoot, "data", "xfinity-bills");
+    const outputDir = path.join(process.cwd(), "data", "xfinity-bills");
 
     // Ensure output directory exists
     await fs.mkdir(outputDir, { recursive: true });
@@ -203,78 +198,17 @@ export async function GET(req: NextRequest) {
       args.push("--parse-only");
     }
 
-    // Run the Python scraper using a virtual environment
-    // Try xfinity venv first, then fall back to spectrum or enbridge-gas venv
-    const venvPaths = [
-      path.join(projectRoot, "scripts", "xfinity", ".venv", "bin", "python"),
-      path.join(projectRoot, "scripts", "spectrum", ".venv", "bin", "python"),
-      path.join(projectRoot, "scripts", "enbridge-gas", ".venv", "bin", "python"),
-    ];
+    const result = await runScraper({
+      scraperName: "xfinity",
+      args,
+      outputFile,
+    });
 
-    let pythonPath = "";
-    for (const p of venvPaths) {
-      try {
-        await fs.access(p);
-        pythonPath = p;
-        break;
-      } catch {
-        continue;
-      }
-    }
-
-    if (!pythonPath) {
+    if (!result.success) {
       return NextResponse.json(
-        {
-          error: "Python virtual environment not found. Run 'cd scripts/spectrum && ./setup.sh' to set up the scraper.",
-        },
+        { error: "Failed to run Xfinity scraper", details: result.error },
         { status: 500 }
       );
-    }
-
-    try {
-      const { stderr } = await execAsync(
-        `${pythonPath} ${scriptPath} ${args.join(" ")}`,
-        {
-          cwd: path.join(projectRoot, "scripts", "xfinity"),
-          timeout: 300000, // 5 minute timeout
-          env: {
-            ...process.env,
-            PYTHONPATH: path.join(projectRoot, "scripts", "xfinity"),
-            PLAYWRIGHT_BROWSERS_PATH: path.join(projectRoot, "scripts", "xfinity", ".cache", "ms-playwright"),
-          },
-        }
-      );
-
-      if (stderr && !stderr.includes("DevTools")) {
-        console.warn("Scraper stderr:", stderr);
-      }
-    } catch (execError: unknown) {
-      const error = execError as { code?: number; stderr?: string; message?: string };
-      console.error("Scraper execution error:", error);
-
-      // Check for specific error types
-      const stderr = error.stderr || "";
-      if (stderr.includes("playwright install") || stderr.includes("Executable doesn't exist")) {
-        return NextResponse.json(
-          {
-            error: "Playwright browsers not installed. Run 'cd scripts/xfinity && ./setup.sh' to enable portal downloads.",
-            details: "The scraper requires Playwright browsers to log into the Xfinity portal.",
-          },
-          { status: 500 }
-        );
-      }
-
-      try {
-        await fs.access(outputFile);
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Failed to run Xfinity scraper",
-            details: error.stderr || error.message,
-          },
-          { status: 500 }
-        );
-      }
     }
 
     // Read results

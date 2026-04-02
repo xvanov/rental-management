@@ -7,7 +7,9 @@ node_modules
 .env*
 !.env.production.example
 data/
-scripts/
+scripts/*/.venv
+scripts/*/.cache
+scripts/*/node_modules
 *.log
 start.log
 start.sh

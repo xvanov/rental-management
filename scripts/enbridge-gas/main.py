@@ -72,7 +72,7 @@ def main():
         load_dotenv(env_local, override=True)
 
     # Download directory
-    download_dir = project_root / "data" / "enbridge-bills"
+    download_dir = project_root / "data" / "downloaded-bills" / "enbridge-gas"
     download_dir.mkdir(parents=True, exist_ok=True)
 
     if args.parse_only or args.test:

@@ -301,6 +301,16 @@ export default function UtilitiesPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<UtilityBill | null>(null);
   const [activeProviderDialog, setActiveProviderDialog] = useState<string | null>(null);
+  const [scraperJobs, setScraperJobs] = useState<Array<{
+    id: string;
+    provider: string;
+    providerName: string;
+    status: "running" | "completed" | "failed";
+    startedAt: string;
+    completedAt: string | null;
+    error: string | null;
+    result: { billCount: number; stored: number; updated: number; imported?: number } | null;
+  }>>([]);
 
   // Sorting state
   const [billsSort, setBillsSort] = useState<{ column: string; direction: "asc" | "desc" }>({
@@ -418,6 +428,46 @@ export default function UtilitiesPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Scraper jobs polling
+  const fetchJobs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/utilities/jobs");
+      if (res.ok) {
+        const data = await res.json();
+        setScraperJobs(data.jobs || []);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchJobs();
+    const hasRunning = scraperJobs.some((j) => j.status === "running");
+    const interval = setInterval(fetchJobs, hasRunning ? 5000 : 30000);
+    return () => clearInterval(interval);
+  }, [fetchJobs, scraperJobs.length]);
+
+  // When a running job completes, refresh the bills data
+  useEffect(() => {
+    const justCompleted = scraperJobs.some(
+      (j) => j.status === "completed" && j.completedAt &&
+        Date.now() - new Date(j.completedAt).getTime() < 10000
+    );
+    if (justCompleted) {
+      fetchData();
+    }
+  }, [scraperJobs, fetchData]);
+
+  const handleJobStarted = useCallback(() => {
+    fetchJobs();
+  }, [fetchJobs]);
+
+  const dismissJob = async (id: string) => {
+    await fetch(`/api/utilities/jobs?id=${id}`, { method: "DELETE" });
+    fetchJobs();
+  };
 
   // Handle bill editing
   const openEditDialog = (bill: UtilityBill) => {
@@ -578,48 +628,56 @@ export default function UtilitiesPage() {
         open={activeProviderDialog === "durham-water"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "durham-water" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={DUKE_ENERGY_CONFIG}
         open={activeProviderDialog === "duke-energy"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "duke-energy" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={ENBRIDGE_GAS_CONFIG}
         open={activeProviderDialog === "enbridge-gas"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "enbridge-gas" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={WAKE_ELECTRIC_CONFIG}
         open={activeProviderDialog === "wake-electric"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "wake-electric" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={GRAHAM_UTILITIES_CONFIG}
         open={activeProviderDialog === "graham-utilities"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "graham-utilities" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={SMUD_CONFIG}
         open={activeProviderDialog === "smud"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "smud" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={SPECTRUM_CONFIG}
         open={activeProviderDialog === "spectrum"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "spectrum" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
       <UtilityProviderDialog
         config={XFINITY_CONFIG}
         open={activeProviderDialog === "xfinity"}
         onOpenChange={(open) => setActiveProviderDialog(open ? "xfinity" : null)}
         onImportComplete={fetchData}
+        onJobStarted={handleJobStarted}
       />
 
       <div className="flex items-center justify-between">
@@ -876,6 +934,68 @@ export default function UtilitiesPage() {
             <div className="mt-4 pt-4 border-t flex justify-between items-center">
               <span className="text-muted-foreground">Total for period:</span>
               <span className="text-xl font-bold">{formatCurrency(tenantSplits.grandTotal)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Scraper Jobs */}
+      {scraperJobs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Scraper Jobs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {scraperJobs.map((job) => (
+                <div key={job.id} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    {job.status === "running" && (
+                      <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                    )}
+                    {job.status === "completed" && (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    )}
+                    {job.status === "failed" && (
+                      <div className="h-2 w-2 rounded-full bg-red-500" />
+                    )}
+                    <span className="font-medium">{job.providerName}</span>
+                    {job.status === "running" && (
+                      <Badge variant="secondary" className="text-xs">Running...</Badge>
+                    )}
+                    {job.status === "completed" && job.result && (
+                      <Badge variant="outline" className="text-xs text-green-600 border-green-600">
+                        {job.result.imported ? `${job.result.imported} imported` : "up to date"}
+                        {job.result.updated ? `, ${job.result.updated} updated` : ""}
+                      </Badge>
+                    )}
+                    {job.status === "failed" && (
+                      <Badge variant="destructive" className="text-xs">
+                        Failed
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {job.status === "running"
+                        ? `Started ${Math.round((Date.now() - new Date(job.startedAt).getTime()) / 60000)}m ago`
+                        : job.completedAt
+                          ? `${Math.round((Date.now() - new Date(job.completedAt).getTime()) / 60000)}m ago`
+                          : ""}
+                    </span>
+                    {job.status !== "running" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => dismissJob(job.id)}
+                      >
+                        Dismiss
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>

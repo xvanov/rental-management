@@ -77,7 +77,7 @@ def parse_existing_pdfs(pdf_dir: Path) -> list[SmudBillData]:
 
 def test_parser():
     """Test the parser with sample files."""
-    sample_dir = get_project_root() / "data" / "smud-bills"
+    sample_dir = get_project_root() / "data" / "downloaded-bills" / "smud"
 
     print("Testing parser with sample files...")
     print("="*60)
@@ -108,13 +108,12 @@ def fetch_from_portal(headless: bool = True) -> FetchResult:
         print("Error: SMUD_USER and SMUD_PASS must be set")
         return FetchResult(success=False, errors=["Missing credentials"])
 
-    download_dir = get_project_root() / "data" / "smud-bills"
+    download_dir = get_project_root() / "data" / "downloaded-bills" / "smud"
 
     scraper = SmudScraper(
         username=username,
         password=password,
         download_dir=str(download_dir),
-        target_addresses=target_addresses,
     )
 
     return scraper.fetch_bills(headless=headless)
@@ -181,7 +180,7 @@ def main():
 
     elif args.parse_only:
         # Parse existing PDFs
-        download_dir = get_project_root() / "data" / "smud-bills"
+        download_dir = get_project_root() / "data" / "downloaded-bills" / "smud"
         bills = parse_existing_pdfs(download_dir)
 
         if args.json or args.output:

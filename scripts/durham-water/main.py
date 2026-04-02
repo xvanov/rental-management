@@ -104,7 +104,7 @@ def fetch_from_portal(headless: bool = True) -> FetchResult:
         print("Error: DURHAM_WATER_USER and DURHAM_WATER_PASS must be set")
         return FetchResult(success=False, errors=["Missing credentials"])
 
-    download_dir = get_project_root() / "data" / "downloaded-bills"
+    download_dir = get_project_root() / "data" / "downloaded-bills" / "durham-water"
 
     scraper = DurhamWaterScraper(
         username=username,
@@ -175,7 +175,7 @@ def main():
 
     elif args.parse_only:
         # Parse existing PDFs
-        download_dir = get_project_root() / "data" / "downloaded-bills"
+        download_dir = get_project_root() / "data" / "downloaded-bills" / "durham-water"
         bills = parse_existing_pdfs(download_dir)
 
         if args.json or args.output:

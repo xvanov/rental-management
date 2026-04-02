@@ -75,7 +75,7 @@ def parse_existing_pdfs(pdf_dir: Path) -> list[GrahamBillData]:
 
 def test_parser():
     """Test the parser with sample files."""
-    sample_dir = get_project_root() / "data" / "graham-bills"
+    sample_dir = get_project_root() / "data" / "downloaded-bills" / "graham-utilities"
 
     print("Testing parser with sample files...")
     print("="*60)
@@ -97,14 +97,14 @@ def fetch_from_portal(headless: bool = True) -> FetchResult:
     """Fetch bills from the Graham Utilities portal."""
     from scraper import GrahamUtilitiesScraper
 
-    account_id = os.getenv("GRAHAM_UTILITIES_ACCOUNT")
-    pin = os.getenv("GRAHAM_UTILITIES_PIN")
+    account_id = os.getenv("GRAHAM_UTILITIES_ACCOUNT") or os.getenv("GRAHAM_WATER_ACCTID")
+    pin = os.getenv("GRAHAM_UTILITIES_PIN") or os.getenv("GRAHAM_WATER_PIN")
 
     if not account_id or not pin:
         print("Error: GRAHAM_UTILITIES_ACCOUNT and GRAHAM_UTILITIES_PIN must be set")
         return FetchResult(success=False, errors=["Missing credentials"])
 
-    download_dir = get_project_root() / "data" / "graham-bills"
+    download_dir = get_project_root() / "data" / "downloaded-bills" / "graham-utilities"
 
     scraper = GrahamUtilitiesScraper(
         account_id=account_id,
@@ -175,7 +175,7 @@ def main():
 
     elif args.parse_only:
         # Parse existing PDFs
-        download_dir = get_project_root() / "data" / "graham-bills"
+        download_dir = get_project_root() / "data" / "downloaded-bills" / "graham-utilities"
         bills = parse_existing_pdfs(download_dir)
 
         if args.json or args.output:

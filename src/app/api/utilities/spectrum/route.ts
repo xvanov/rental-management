@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { SpectrumDocType } from "@/generated/prisma/client";
-import { exec } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { runScraper } from "@/lib/utilities/scraper-runner";
 import {
   getAddressToPropertyMap,
   matchPropertyId,
 } from "@/lib/utilities/address-matching";
-
-const execAsync = promisify(exec);
 
 interface SpectrumBill {
   document_type: "bill" | "disconnect_notice" | "unknown";
@@ -172,9 +169,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const projectRoot = process.cwd();
-    const scriptPath = path.join(projectRoot, "scripts", "spectrum", "main.py");
-    const outputDir = path.join(projectRoot, "data", "spectrum-bills");
+    const outputDir = path.join(process.cwd(), "data", "spectrum-bills");
 
     // Ensure output directory exists
     await fs.mkdir(outputDir, { recursive: true });
@@ -199,73 +194,17 @@ export async function GET(req: NextRequest) {
       args.push("--parse-only");
     }
 
-    // Run the Python scraper using the virtual environment
-    const venvPython = path.join(projectRoot, "scripts", "spectrum", ".venv", "bin", "python");
+    const result = await runScraper({
+      scraperName: "spectrum",
+      args,
+      outputFile,
+    });
 
-    // Check if venv exists, fall back to enbridge-gas venv if not
-    let pythonPath = venvPython;
-    try {
-      await fs.access(venvPython);
-    } catch {
-      // Try enbridge-gas venv as fallback
-      const fallbackPython = path.join(projectRoot, "scripts", "enbridge-gas", ".venv", "bin", "python");
-      try {
-        await fs.access(fallbackPython);
-        pythonPath = fallbackPython;
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Python virtual environment not found. Run 'cd scripts/spectrum && ./setup.sh' to set up the scraper.",
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    try {
-      const { stderr } = await execAsync(
-        `${pythonPath} ${scriptPath} ${args.join(" ")}`,
-        {
-          cwd: path.join(projectRoot, "scripts", "spectrum"),
-          timeout: 300000, // 5 minute timeout
-          env: {
-            ...process.env,
-            PYTHONPATH: path.join(projectRoot, "scripts", "spectrum"),
-            PLAYWRIGHT_BROWSERS_PATH: path.join(projectRoot, "scripts", "spectrum", ".cache", "ms-playwright"),
-          },
-        }
+    if (!result.success) {
+      return NextResponse.json(
+        { error: "Failed to run Spectrum scraper", details: result.error },
+        { status: 500 }
       );
-
-      if (stderr && !stderr.includes("DevTools")) {
-        console.warn("Scraper stderr:", stderr);
-      }
-    } catch (execError: unknown) {
-      const error = execError as { code?: number; stderr?: string; message?: string };
-      console.error("Scraper execution error:", error);
-
-      // Check for specific error types
-      const stderr = error.stderr || "";
-      if (stderr.includes("playwright install") || stderr.includes("Executable doesn't exist")) {
-        return NextResponse.json(
-          {
-            error: "Playwright browsers not installed. Run 'cd scripts/spectrum && ./setup.sh' to enable portal downloads.",
-            details: "The scraper requires Playwright browsers to log into the Spectrum portal.",
-          },
-          { status: 500 }
-        );
-      }
-
-      try {
-        await fs.access(outputFile);
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Failed to run Spectrum scraper",
-            details: error.stderr || error.message,
-          },
-          { status: 500 }
-        );
-      }
     }
 
     // Read results

@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { DukeEnergyDocType } from "@/generated/prisma/client";
-import { exec } from "child_process";
-import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
   getAddressToPropertyMap,
   matchPropertyId,
 } from "@/lib/utilities/address-matching";
-
-const execAsync = promisify(exec);
+import { runScraper } from "@/lib/utilities/scraper-runner";
 
 interface DukeEnergyBill {
   document_type: "bill" | "disconnect_notice" | "unknown";
@@ -199,7 +196,6 @@ export async function GET(req: NextRequest) {
     }
 
     const projectRoot = process.cwd();
-    const scriptPath = path.join(projectRoot, "scripts", "duke-energy", "main.py");
     const outputDir = path.join(projectRoot, "data", "downloaded-bills", "duke-energy");
 
     // Ensure output directory exists
@@ -228,52 +224,18 @@ export async function GET(req: NextRequest) {
       args.push("--account", account);
     }
 
-    // Run the Python scraper using the virtual environment
-    const venvPython = path.join(projectRoot, "scripts", "duke-energy", ".venv", "bin", "python");
+    // Run the Python scraper (auto-finds local venv or Docker shared venv)
+    const result = await runScraper({
+      scraperName: "duke-energy",
+      args,
+      outputFile,
+    });
 
-    try {
-      const { stderr } = await execAsync(
-        `${venvPython} ${scriptPath} ${args.join(" ")}`,
-        {
-          cwd: path.join(projectRoot, "scripts", "duke-energy"),
-          timeout: 300000, // 5 minute timeout
-          env: {
-            ...process.env,
-            PYTHONPATH: path.join(projectRoot, "scripts", "duke-energy"),
-            PLAYWRIGHT_BROWSERS_PATH: path.join(projectRoot, "scripts", "duke-energy", ".cache", "ms-playwright"),
-          },
-        }
+    if (!result.success) {
+      return NextResponse.json(
+        { error: "Failed to run Duke Energy scraper", details: result.error },
+        { status: 500 }
       );
-
-      if (stderr && !stderr.includes("DevTools")) {
-        console.warn("Scraper stderr:", stderr);
-      }
-    } catch (execError: unknown) {
-      const error = execError as { code?: number; stderr?: string; message?: string };
-      console.error("Scraper execution error:", error);
-
-      const stderr = error.stderr || "";
-      if (stderr.includes("playwright install") || stderr.includes("Executable doesn't exist")) {
-        return NextResponse.json(
-          {
-            error: "Playwright browsers not installed. Run setup.sh in scripts/duke-energy/ first.",
-            details: "The scraper requires Playwright browsers to log into the Duke Energy portal.",
-          },
-          { status: 500 }
-        );
-      }
-
-      try {
-        await fs.access(outputFile);
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Failed to run Duke Energy scraper",
-            details: error.stderr || error.message,
-          },
-          { status: 500 }
-        );
-      }
     }
 
     // Read results
@@ -297,21 +259,14 @@ export async function GET(req: NextRequest) {
       matched_property_id: matchPropertyId(bill.service_address, addressMap),
     }));
 
-    // Deduplicate by account number - keep only the most recent bill per account
-    const billsByAccount = new Map<string, typeof enrichedBills[0]>();
-    for (const bill of enrichedBills) {
-      const existing = billsByAccount.get(bill.account_number);
-      if (!existing) {
-        billsByAccount.set(bill.account_number, bill);
-      } else {
-        const existingDate = existing.bill_date ? new Date(existing.bill_date).getTime() : 0;
-        const newDate = bill.bill_date ? new Date(bill.bill_date).getTime() : 0;
-        if (newDate > existingDate) {
-          billsByAccount.set(bill.account_number, bill);
-        }
-      }
-    }
-    const deduplicatedBills = Array.from(billsByAccount.values());
+    // Deduplicate by account number + billing period end (keep all distinct bills)
+    const seen = new Set<string>();
+    const deduplicatedBills = enrichedBills.filter((bill) => {
+      const key = `${bill.account_number}_${bill.billing_period_end ?? bill.bill_date ?? "unknown"}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     // Store parsed bills in the database
     const { stored, updated } = await storeParsedBills(deduplicatedBills);
