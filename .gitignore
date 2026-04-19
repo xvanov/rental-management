@@ -48,6 +48,9 @@ src/generated/prisma
 # utility bill data (contains sensitive info)
 /data/
 
+# service account keys, credentials
+/secrets/
+
 # Python virtual environments and caches
 /scripts/*/.venv/
 /scripts/*/.cache/
