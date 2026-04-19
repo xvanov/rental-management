@@ -239,7 +239,11 @@ export async function sendFacebookMessage({
   tenantId,
   propertyId,
 }: SendFacebookMessageOptions) {
-  const isDryRun = process.env.FACEBOOK_DRY_RUN === "true";
+  // Auto-dry-run for synthetic test PSIDs used by scripts/test-facebook-flow.ts.
+  // Real Messenger PSIDs are numeric; our test script prefixes with "test_psid_".
+  const isDryRun =
+    process.env.FACEBOOK_DRY_RUN === "true" ||
+    recipientId.startsWith("test_psid_");
   let responseData: { message_id?: string } = {};
 
   if (isDryRun) {
