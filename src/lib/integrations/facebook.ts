@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { logMessageEvent, logSystemEvent } from "@/lib/events";
+import type { Prisma } from "@/generated/prisma/client";
 
 // ─── Meta Graph API Configuration ───────────────────────────────────────────
 
@@ -301,6 +302,13 @@ export async function sendFacebookMessage({
 
 // ─── Process Incoming Messenger Message ─────────────────────────────────────
 
+export interface MessengerReferral {
+  ref?: string; // Custom ref set on click-to-Messenger ad (we encode listingId)
+  ad_id?: string; // Ad ID if the referral came from an ad
+  source?: string; // "ADS", "SHORTLINK", "CUSTOMER_CHAT_PLUGIN", etc.
+  type?: string; // "OPEN_THREAD", etc.
+}
+
 export interface IncomingFacebookMessage {
   senderId: string; // Facebook PSID
   recipientId: string; // Page ID
@@ -311,15 +319,40 @@ export interface IncomingFacebookMessage {
     type: string;
     payload: { url?: string };
   }>;
+  /** Ad / shortlink referral payload when the thread opened from an ad. */
+  referral?: MessengerReferral;
+  /**
+   * True if this event is an echo of a message the Page sent (e.g. a human
+   * reply sent from Meta Business Suite). The webhook handler uses this to
+   * flip humanTakeover without triggering the bot.
+   */
+  isEcho?: boolean;
+}
+
+/**
+ * Extract a listing ID from a Messenger referral ref.
+ * We encode refs as `listing_<id>` when creating click-to-Messenger ads.
+ */
+function decodeListingRef(ref?: string): string | null {
+  if (!ref) return null;
+  const match = ref.match(/^listing_(.+)$/);
+  return match ? match[1] : null;
 }
 
 /**
  * Process an incoming Facebook Messenger message.
  * Links to tenant by Facebook ID, creates Message + Event records.
  * Returns phone detection result for channel switching.
+ *
+ * Handles three variants:
+ *  - Normal inbound from prospect → INBOUND Message row, returned for FSM.
+ *  - is_echo (Page replied manually from Business Suite) → OUTBOUND Message
+ *    row logged, caller should flip humanTakeover and skip FSM.
+ *  - Referral-only event (thread opened from CTM ad) → no Message row created
+ *    (nothing was said yet); returns attribution hints for the FSM to use on
+ *    the first real message.
  */
 export async function processIncomingFacebookMessage(data: IncomingFacebookMessage) {
-  // Look up tenant by facebookId
   const tenant = await prisma.tenant.findFirst({
     where: {
       facebookId: data.senderId,
@@ -332,36 +365,64 @@ export async function processIncomingFacebookMessage(data: IncomingFacebookMessa
     },
   });
 
-  // Detect phone number in message for channel switching
+  const referralListingId = decodeListingRef(data.referral?.ref);
+
+  // Skip message row for referral-only events (no actual message yet).
+  if (!data.text && data.referral) {
+    await logSystemEvent({
+      action: "FACEBOOK_AD_REFERRAL",
+      description: `Thread opened from ${data.referral.source ?? "ad"} referral${data.referral.ad_id ? ` (ad ${data.referral.ad_id})` : ""}`,
+      metadata: {
+        senderId: data.senderId,
+        referral: data.referral,
+        referralListingId,
+      },
+    });
+    return {
+      message: null,
+      tenant: tenant
+        ? { id: tenant.id, name: `${tenant.firstName} ${tenant.lastName}` }
+        : null,
+      matched: !!tenant,
+      phoneDetection: { detected: false, phone: null },
+      senderId: data.senderId,
+      isEcho: false,
+      referral: data.referral,
+      referralListingId,
+    };
+  }
+
   const phoneDetection = detectPhoneNumber(data.text);
 
-  // Create message record
   const message = await prisma.message.create({
     data: {
       tenantId: tenant?.id ?? null,
       channel: "FACEBOOK",
-      direction: "INBOUND",
+      direction: data.isEcho ? "OUTBOUND" : "INBOUND",
       content: data.text,
       read: false,
       metadata: {
         facebookMessageId: data.messageId,
         senderId: data.senderId,
+        recipientId: data.recipientId,
         timestamp: data.timestamp,
         attachments: data.attachments ?? [],
         phoneDetected: phoneDetection.detected,
         detectedPhone: phoneDetection.phone,
-      },
+        isEcho: data.isEcho ?? false,
+        referral: data.referral ? { ...data.referral } : null,
+      } as Prisma.InputJsonValue,
     },
   });
 
-  // Log as immutable event
   await logMessageEvent(
     {
       messageId: message.id,
       channel: "FACEBOOK",
-      direction: "INBOUND",
+      direction: data.isEcho ? "OUTBOUND" : "INBOUND",
       content: data.text,
-      from: data.senderId,
+      from: data.isEcho ? undefined : data.senderId,
+      to: data.isEcho ? data.senderId : undefined,
     },
     {
       tenantId: tenant?.id,
@@ -377,6 +438,9 @@ export async function processIncomingFacebookMessage(data: IncomingFacebookMessa
     matched: !!tenant,
     phoneDetection,
     senderId: data.senderId,
+    isEcho: data.isEcho ?? false,
+    referral: data.referral,
+    referralListingId,
   };
 }
 
@@ -1019,11 +1083,15 @@ export interface WebhookEntry {
     message?: {
       mid: string;
       text?: string;
+      is_echo?: boolean;
       attachments?: Array<{
         type: string;
         payload: { url?: string };
       }>;
+      referral?: MessengerReferral;
     };
+    /** New-thread referral (fires on first tap from a CTM ad, before any message). */
+    referral?: MessengerReferral;
     delivery?: { mids: string[] };
     read?: { watermark: number };
   }>;
@@ -1032,6 +1100,11 @@ export interface WebhookEntry {
 /**
  * Parse incoming webhook payload from Facebook.
  * Extracts messaging events and returns structured data.
+ *
+ * Handles three event shapes:
+ *   - `message` with text (normal inbound from prospect, or is_echo from Page)
+ *   - `message` with referral (first message from a click-to-Messenger ad)
+ *   - `referral` without message (thread-opened event from CTM ad)
  */
 export function parseWebhookPayload(body: {
   object: string;
@@ -1047,7 +1120,21 @@ export function parseWebhookPayload(body: {
     if (!entry.messaging) continue;
 
     for (const event of entry.messaging) {
-      // Only process actual messages (not delivery/read receipts)
+      // Referral-only events (user tapped CTM ad, thread opened, no message yet).
+      // Emit a synthetic empty-text event so processIncomingFacebookMessage can
+      // attribute the conversation to the listing.
+      if (!event.message && event.referral) {
+        messages.push({
+          senderId: event.sender.id,
+          recipientId: event.recipient.id,
+          text: "",
+          messageId: `ref_${event.timestamp}_${event.sender.id}`,
+          timestamp: event.timestamp,
+          referral: event.referral,
+        });
+        continue;
+      }
+
       if (event.message && event.message.text) {
         messages.push({
           senderId: event.sender.id,
@@ -1056,6 +1143,8 @@ export function parseWebhookPayload(body: {
           messageId: event.message.mid,
           timestamp: event.timestamp,
           attachments: event.message.attachments,
+          referral: event.message.referral ?? event.referral,
+          isEcho: event.message.is_echo === true,
         });
       }
     }

@@ -3,7 +3,10 @@ import { ConversationStage } from "@/generated/prisma/client";
 import { getLanguageModel, isAIConfigured } from "@/lib/ai";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getAvailableSlots, isCalendarConfigured, createCalendarEvent } from "@/lib/integrations/google-calendar";
+import {
+  getAvailableSlotsForOrg,
+  getCalendarProvider,
+} from "@/lib/calendar/provider";
 import { createEvent } from "@/lib/events";
 import { getQueue } from "@/lib/jobs";
 
@@ -27,6 +30,9 @@ const ConversationActionSchema = z.object({
   selectedSlotIndex: z.number().optional().describe("0-based index of the selected time slot"),
   wantsToSchedule: z.boolean().optional().describe("Whether the prospect wants to schedule a showing"),
   declined: z.boolean().optional().describe("Whether the prospect declined or is not interested"),
+  requestsHuman: z.boolean().optional().describe(
+    "True if the prospect explicitly asked to speak with a human/real person/agent/manager, or if the message requires human judgment the AI cannot handle. When true, the bot will hand off and stop replying."
+  ),
 });
 
 type ConversationAction = z.infer<typeof ConversationActionSchema>;
@@ -42,6 +48,16 @@ export async function handleConversationMessage(
   incomingText: string,
   _messageId: string
 ): Promise<string> {
+  // Defense-in-depth: if any conversation for this sender is in human-takeover,
+  // stay silent. (The webhook route also checks this upstream.)
+  const takeoverCheck = await prisma.facebookConversation.findFirst({
+    where: { senderPsid, humanTakeover: true },
+    select: { id: true },
+  });
+  if (takeoverCheck) {
+    return "";
+  }
+
   // Check if this sender already has an active conversation
   const existingConversation = await prisma.facebookConversation.findFirst({
     where: {
@@ -61,6 +77,7 @@ export async function handleConversationMessage(
       property: {
         select: {
           id: true, address: true, city: true, state: true, zip: true,
+          organizationId: true,
           profile: true,
         },
       },
@@ -142,10 +159,14 @@ export async function handleConversationMessage(
     "INITIAL_INQUIRY",
   ];
 
-  if (schedulingStages.includes(conversation.stage) && isCalendarConfigured()) {
+  if (schedulingStages.includes(conversation.stage)) {
     const now = new Date();
     const fiveDaysOut = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
-    availableSlots = await getAvailableSlots(now, fiveDaysOut);
+    availableSlots = await getAvailableSlotsForOrg(
+      activeListing.property.organizationId,
+      now,
+      fiveDaysOut
+    );
 
     // Pick up to 5 well-distributed slots
     const selectedSlots = selectDistributedSlots(availableSlots, 5);
@@ -244,6 +265,12 @@ You represent a property management company. Be warm, helpful, and concise (2-4 
 Never make up information about the property. Only use facts from the listing data provided.
 Your goal is to answer questions and guide the prospect toward scheduling a showing.
 
+On the VERY FIRST reply (stage INITIAL_INQUIRY), always open by referencing the specific property: price, address, and any standout detail (beds/baths, pets, date available). Do NOT send a generic "thanks for your interest" — the prospect came from an ad for THIS property and wants confirmation they reached the right place.
+
+Actively steer toward collecting an email or phone number so you can follow up if Messenger's 24-hour window closes. Ask for it naturally, not aggressively.
+
+Set requestsHuman=true if the prospect explicitly asks to talk to a person/human/manager/agent, says the bot isn't helping, or asks something you genuinely can't answer from the property data (complex legal questions, unusual circumstances, disputes). When requestsHuman is true, write a short handoff message ("A team member will get back to you shortly.") as the responseText — that's the last thing the bot will say.
+
 ${propertyInfo}
 
 Current conversation stage: ${currentStage}
@@ -339,7 +366,7 @@ function getFallbackAction(stage: ConversationStage, slotsText: string): Convers
 async function executeAction(
   action: ConversationAction,
   conversation: { id: string; stage: ConversationStage; propertyId: string; prospectName: string | null },
-  listing: { id: string; property: { id: string; address: string; city: string; state: string } },
+  listing: { id: string; property: { id: string; address: string; city: string; state: string; organizationId: string } },
   senderPsid: string,
   availableSlots: { start: Date; end: Date }[]
 ): Promise<string> {
@@ -353,6 +380,13 @@ async function executeAction(
   if (action.extractedName) updates.prospectName = action.extractedName;
   if (action.extractedPhone) updates.prospectPhone = action.extractedPhone;
   if (action.extractedEmail) updates.prospectEmail = action.extractedEmail;
+
+  // Escape hatch: prospect asked for a human (or AI flagged it). Flip
+  // humanTakeover so the webhook stops invoking the bot on future messages.
+  // The current responseText (a short handoff message) will still be sent.
+  if (action.requestsHuman) {
+    updates.humanTakeover = true;
+  }
 
   // Handle showing booking
   if (action.nextStage === "SHOWING_BOOKED") {
@@ -389,7 +423,7 @@ async function executeAction(
 
 async function bookShowing(
   conversation: { id: string; propertyId: string; prospectName: string | null },
-  listing: { id: string; property: { id: string; address: string; city: string; state: string } },
+  listing: { id: string; property: { id: string; address: string; city: string; state: string; organizationId: string } },
   senderPsid: string,
   action: ConversationAction,
   availableSlots: { start: Date; end: Date }[]
@@ -442,11 +476,14 @@ async function bookShowing(
     },
   });
 
-  // Create Google Calendar event if configured
-  if (isCalendarConfigured()) {
-    try {
+  // Mirror the showing onto the org's calendar provider. For Internal this
+  // is a no-op (the Showing row itself blocks the slot); for Google it
+  // creates an event.
+  try {
+    const provider = await getCalendarProvider(listing.property.organizationId);
+    if (await provider.isConfigured()) {
       const location = `${listing.property.address}, ${listing.property.city}, ${listing.property.state}`;
-      await createCalendarEvent({
+      await provider.createEvent({
         summary: `Showing: ${listing.property.address} — ${prospectName}`,
         description: `Property showing booked via Facebook Messenger.\nProspect: ${prospectName}\nPSID: ${senderPsid}`,
         startTime: showingStart,
@@ -454,9 +491,9 @@ async function bookShowing(
         attendeeEmail: action.extractedEmail,
         location,
       });
-    } catch (err) {
-      console.error("Failed to create calendar event:", err);
     }
+  } catch (err) {
+    console.error("Failed to create calendar event:", err);
   }
 
   // Log showing event

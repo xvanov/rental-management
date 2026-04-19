@@ -9,6 +9,7 @@ import {
 } from "@/lib/integrations/facebook";
 import { handleConversationMessage } from "@/lib/facebook-conversation";
 import { prisma } from "@/lib/db";
+import { logSystemEvent } from "@/lib/events";
 
 /**
  * GET /api/webhooks/facebook
@@ -60,11 +61,65 @@ export async function POST(request: NextRequest) {
 
     const results = [];
     for (const msg of messages) {
-      // 1. Store the incoming message
+      // 1. Store the incoming message / referral.
       const result = await processIncomingFacebookMessage(msg);
       results.push(result);
 
-      // 2. If phone detected, store on conversation record (but stay on Messenger)
+      // 2. Referral-only event (thread opened from a CTM ad, no text yet).
+      //    Pre-create the FacebookConversation with correct listingId so the
+      //    first real message is attributed properly. No reply is sent yet —
+      //    we wait for the prospect to say something.
+      if (!msg.text && msg.referral) {
+        if (result.referralListingId) {
+          const listing = await prisma.listing.findUnique({
+            where: { id: result.referralListingId },
+            select: { id: true, propertyId: true },
+          });
+          if (listing) {
+            await prisma.facebookConversation.upsert({
+              where: {
+                senderPsid_propertyId: {
+                  senderPsid: msg.senderId,
+                  propertyId: listing.propertyId,
+                },
+              },
+              create: {
+                senderPsid: msg.senderId,
+                propertyId: listing.propertyId,
+                listingId: listing.id,
+                stage: "INITIAL_INQUIRY",
+                adReferralRef: msg.referral.ref,
+                adId: msg.referral.ad_id,
+              },
+              update: {
+                listingId: listing.id,
+                adReferralRef: msg.referral.ref,
+                adId: msg.referral.ad_id,
+              },
+            });
+          }
+        }
+        continue;
+      }
+
+      // 3. Echo of a message sent by the Page itself (e.g. a human reply from
+      //    Meta Business Suite). Log it, flip humanTakeover, do NOT run the
+      //    bot. The human's message has already been delivered to the user by
+      //    Meta; we just need to stop replying on top of them.
+      if (msg.isEcho) {
+        await prisma.facebookConversation.updateMany({
+          where: { senderPsid: msg.senderId },
+          data: { humanTakeover: true, lastMessageAt: new Date() },
+        });
+        await logSystemEvent({
+          action: "FACEBOOK_HUMAN_TAKEOVER",
+          description: `Human replied from Page inbox for sender ${msg.senderId}; bot paused.`,
+          metadata: { senderId: msg.senderId, content: msg.text },
+        });
+        continue;
+      }
+
+      // 4. Normal inbound from prospect. Persist phone if detected.
       const phoneDetection = detectPhoneNumber(msg.text);
       if (phoneDetection.detected && phoneDetection.phone) {
         await prisma.facebookConversation.updateMany({
@@ -73,7 +128,49 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // 3. Run conversation AI engine
+      // 5. If this is the first real message after a CTM referral, ensure the
+      //    conversation is tied to the right listing before the FSM runs.
+      if (result.referralListingId) {
+        const listing = await prisma.listing.findUnique({
+          where: { id: result.referralListingId },
+          select: { id: true, propertyId: true },
+        });
+        if (listing) {
+          await prisma.facebookConversation.upsert({
+            where: {
+              senderPsid_propertyId: {
+                senderPsid: msg.senderId,
+                propertyId: listing.propertyId,
+              },
+            },
+            create: {
+              senderPsid: msg.senderId,
+              propertyId: listing.propertyId,
+              listingId: listing.id,
+              stage: "INITIAL_INQUIRY",
+              adReferralRef: msg.referral?.ref,
+              adId: msg.referral?.ad_id,
+            },
+            update: {
+              listingId: listing.id,
+              adReferralRef: msg.referral?.ref ?? undefined,
+              adId: msg.referral?.ad_id ?? undefined,
+            },
+          });
+        }
+      }
+
+      // 6. Human-takeover guard. If a human is driving this thread, log the
+      //    inbound message but don't run the AI or send a reply.
+      const activeConvo = await prisma.facebookConversation.findFirst({
+        where: { senderPsid: msg.senderId },
+        orderBy: { lastMessageAt: "desc" },
+      });
+      if (activeConvo?.humanTakeover) {
+        continue;
+      }
+
+      // 7. Run conversation AI engine.
       try {
         const responseText = await handleConversationMessage(
           msg.senderId,
@@ -81,29 +178,26 @@ export async function POST(request: NextRequest) {
           msg.messageId
         );
 
-        // 4. Send response via Messenger
-        await sendFacebookMessage({
-          recipientId: msg.senderId,
-          text: responseText,
-          tenantId: result.tenant?.id,
-          propertyId: result.tenant ? undefined : undefined,
-        });
+        if (responseText) {
+          await sendFacebookMessage({
+            recipientId: msg.senderId,
+            text: responseText,
+            tenantId: result.tenant?.id,
+          });
+        }
       } catch (err) {
         console.error("Conversation engine error:", err);
-        // Send a graceful fallback (best-effort)
         try {
           await sendFacebookMessage({
             recipientId: msg.senderId,
             text: "Thanks for your message! A team member will follow up with you shortly.",
           });
         } catch {
-          // Can't send fallback either — just log
           console.error("Failed to send fallback message to", msg.senderId);
         }
       }
     }
 
-    // Always return 200 to prevent Facebook retries
     return NextResponse.json({
       status: "ok",
       processed: results.length,

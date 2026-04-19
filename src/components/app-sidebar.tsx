@@ -23,6 +23,7 @@ import {
   Wrench,
   CheckSquare,
   Megaphone,
+  MessageSquare,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 
@@ -56,6 +57,7 @@ const navItems = [
   { title: "Leases", href: "/dashboard/leases", icon: FileText },
   { title: "Listings", href: "/dashboard/listings", icon: Megaphone },
   { title: "Inbox", href: "/dashboard/inbox", icon: Inbox },
+  { title: "Conversations", href: "/dashboard/conversations", icon: MessageSquare },
   { title: "Payments", href: "/dashboard/payments", icon: CreditCard },
   { title: "Utilities", href: "/dashboard/utilities", icon: Zap },
   { title: "Cleaning", href: "/dashboard/cleaning", icon: Sparkles },
