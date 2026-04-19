@@ -33,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ShowingAvailabilitySettings } from "@/components/settings/showing-availability-settings";
 
 interface OrgMember {
   id: string;
@@ -405,6 +406,8 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ShowingAvailabilitySettings isAdmin={isAdmin} />
     </div>
   );
 }
