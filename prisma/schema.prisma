@@ -77,10 +77,36 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Showing availability configuration
+  // calendarProvider: "INTERNAL" (default) or "GOOGLE".
+  // showingHours: per-weekday {start,end} map (0=Sun..6=Sat). null = built-in default.
+  // googleCalendarId: optional per-org override of GOOGLE_CALENDAR_ID env var.
+  calendarProvider  String  @default("INTERNAL")
+  showingHours      Json?
+  googleCalendarId  String?
+
   members        OrganizationMember[]
   invites        OrganizationInvite[]
   properties     Property[]
   leaseTemplates LeaseTemplate[]
+  blackouts      ShowingBlackout[]
+}
+
+// Manually-blocked time ranges used by the Internal calendar provider to
+// exclude slots from the bot's proposed times. (Showings themselves are also
+// treated as busy.)
+model ShowingBlackout {
+  id             String   @id @default(cuid())
+  organizationId String
+  start          DateTime
+  end            DateTime
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([start, end])
 }
 
 model OrganizationMember {
@@ -1067,6 +1093,8 @@ model Listing {
   adCampaignId    String?
   adBudget        Float?
   adDurationDays  Int?
+  adType          String?
+  marketplaceUrl  String?
   bedrooms        Int?
   bathrooms       Float?
   availableDate   DateTime?
@@ -1133,6 +1161,9 @@ model FacebookConversation {
   proposedSlots  Json?
   messageCount   Int               @default(0)
   lastMessageAt  DateTime          @default(now())
+  humanTakeover  Boolean           @default(false)
+  adReferralRef  String?
+  adId           String?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
