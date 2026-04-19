@@ -319,9 +319,12 @@ Set selectedSlotIndex to the 0-based index of their choice (e.g., if they say "2
 If unclear, ask them to clarify. Move to CONFIRMING_BOOKING once selected.`;
 
     case "CONFIRMING_BOOKING":
-      return `Confirm the booking details. If we don't have their name, ask for it.
-${conversation.prospectName ? `We have their name: ${conversation.prospectName}` : "Ask for their name to complete the booking."}
-Once confirmed, move to SHOWING_BOOKED.`;
+      return `Close the loop on the booking NOW.
+
+If we don't have their name yet: ask for it once (short message), keep nextStage=CONFIRMING_BOOKING.
+If we DO have their name (${conversation.prospectName ? `we have it: ${conversation.prospectName}` : "we do NOT have it yet"}): set nextStage=SHOWING_BOOKED in this exact reply. Do NOT say "I'll schedule you" or "you're booked" while keeping nextStage=CONFIRMING_BOOKING — that's a bug. The Showing row only gets created when you set nextStage=SHOWING_BOOKED, so any confirming language in your reply MUST be paired with nextStage=SHOWING_BOOKED.
+
+Reply format when moving to SHOWING_BOOKED: short confirmation ("Perfect, you're booked for <time>. We'll see you then!"), 1-2 sentences.`;
 
     default:
       return "";
