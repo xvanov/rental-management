@@ -30,7 +30,7 @@ interface ListingJson {
 async function main() {
   // Dynamic imports so env vars are loaded before module-level constants execute
   const { prisma } = await import("../src/lib/db");
-  const { createListingPost, createListingAd, isAdsConfigured } = await import("../src/lib/integrations/facebook");
+  const { createListingPost, createMessengerAd, isAdsConfigured } = await import("../src/lib/integrations/facebook");
   const { logSystemEvent } = await import("../src/lib/events");
 
   // Parse flags
@@ -142,20 +142,21 @@ async function main() {
     { propertyId: listing.propertyId }
   );
 
-  // Create a Marketplace ad if configured and not skipped
+  // Create a click-to-Messenger ad if configured and not skipped
   if (!skipAd && !isDryRun && facebookPostId && isAdsConfigured()) {
     const adCity = listing.location?.city ?? "Durham";
     const adState = listing.location?.state ?? "NC";
-    console.log(`\nCreating Marketplace ad ($${adBudget}/day for ${adDays} days, ${adCity} area)...`);
+    console.log(`\nCreating Messenger ad ($${adBudget}/day for ${adDays} days, ${adCity} area)...`);
     try {
-      const adResult = await createListingAd({
-        postId: facebookPostId,
+      const adResult = await createMessengerAd({
+        listingId: dbListing.id,
         listingTitle: listing.title,
         city: adCity,
         state: adState,
         dailyBudgetDollars: adBudget,
         durationDays: adDays,
         startPaused: true,
+        imageUrl: photoUrls[0],
       });
       console.log(`Ad created (PAUSED):`);
       console.log(`  Campaign: ${adResult.campaignId}`);
@@ -168,7 +169,7 @@ async function main() {
   } else if (skipAd) {
     console.log("Skipped ad creation (--no-ad)");
   } else if (isDryRun) {
-    console.log("[DRY RUN] Would create Marketplace ad");
+    console.log("[DRY RUN] Would create Messenger ad");
   }
 
   console.log("\nDone!");

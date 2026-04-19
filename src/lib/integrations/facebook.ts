@@ -599,18 +599,32 @@ export async function validateWebhookSignature(
   return computedHash === signatureHash;
 }
 
-// ─── Marketing API: Marketplace Ads ─────────────────────────────────────────
+// ─── Marketing API: Ads ─────────────────────────────────────────────────────
+//
+// Two ad types are supported:
+//
+//   1. createMarketplaceLinkAd — "Learn More" CTA linking to a Facebook Marketplace
+//      URL (or any external URL). Used to drive prospects to an existing Marketplace
+//      item that was posted manually from a personal profile (required by Meta's
+//      Jan 2025 policy for rentals).
+//
+//   2. createMessengerAd — "Send Message" CTA that opens a Messenger thread with
+//      the Page directly. Prospects are handled by the AI chatbot in
+//      facebook-conversation.ts. This is the higher-conversion path.
+//
+// Both types are HOUSING-category compliant: age 18-65, no interest targeting,
+// geo = city + 15mi radius.
 
 const adAccountId = process.env.FACEBOOK_AD_ACCOUNT_ID;
 
-export interface CreateListingAdOptions {
-  /** The page post ID from createListingPost (format: pageId_postId) */
-  postId: string;
-  /** Display name for the campaign */
+export type AdType = "MARKETPLACE_LINK" | "MESSENGER";
+
+interface BaseAdOptions {
+  /** Display name seeded into campaign / ad set / ad names */
   listingTitle: string;
   /** City for geo-targeting (15-mile radius minimum for housing) */
   city: string;
-  /** State for geo-targeting */
+  /** State for geo-targeting (US state abbreviation, e.g. "FL") */
   state: string;
   /** Daily budget in dollars (minimum $1) */
   dailyBudgetDollars?: number;
@@ -618,6 +632,20 @@ export interface CreateListingAdOptions {
   durationDays?: number;
   /** Start paused for review, or active to go live immediately */
   startPaused?: boolean;
+  /** Ad copy shown above the image */
+  adCopy?: string;
+  /** Absolute URL of the primary image to show in the ad */
+  imageUrl?: string;
+}
+
+export interface CreateMarketplaceLinkAdOptions extends BaseAdOptions {
+  /** The Facebook Marketplace item URL to link to (required) */
+  marketplaceUrl: string;
+}
+
+export interface CreateMessengerAdOptions extends BaseAdOptions {
+  /** Listing ID encoded into the m.me ref parameter for webhook attribution */
+  listingId: string;
 }
 
 export interface ListingAdResult {
@@ -628,36 +656,114 @@ export interface ListingAdResult {
   dailyBudget: number;
   durationDays: number;
   status: string;
+  adType: AdType;
 }
 
 /**
- * Create a Facebook ad campaign that promotes a listing post in Marketplace + Feed.
- * Compliant with HOUSING special ad category restrictions:
- * - Age: 18-65+ (fixed)
- * - Gender: all
- * - Location: city + 15mi radius minimum
- * - No interest/behavior targeting
+ * Create a Facebook ad that drives clicks to a Facebook Marketplace item URL.
+ * CTA: "Learn More".
+ *
+ * Note: Meta's Jan 2025 policy prevents Pages from posting rental listings to
+ * Marketplace organically. The Marketplace item must be posted manually from a
+ * personal profile; paste that URL as `marketplaceUrl`.
  */
-export async function createListingAd({
-  postId,
-  listingTitle,
-  city,
-  state,
-  dailyBudgetDollars = 10,
-  durationDays = 7,
-  startPaused = true,
-}: CreateListingAdOptions): Promise<ListingAdResult> {
-  if (!pageAccessToken || !adAccountId) {
+export async function createMarketplaceLinkAd(
+  options: CreateMarketplaceLinkAdOptions
+): Promise<ListingAdResult> {
+  if (!options.marketplaceUrl) {
+    throw new Error("marketplaceUrl is required for a Marketplace Link ad");
+  }
+
+  return createAdInternal({
+    adType: "MARKETPLACE_LINK",
+    baseOptions: options,
+    linkData: {
+      message: options.adCopy ?? defaultAdCopy(options.listingTitle, options.city, options.state),
+      link: options.marketplaceUrl,
+      picture: options.imageUrl,
+      call_to_action: { type: "LEARN_MORE" },
+    },
+  });
+}
+
+/**
+ * Create a Facebook click-to-Messenger ad. Tapping the ad opens a Messenger
+ * thread with the Page directly; the chatbot handles the conversation.
+ *
+ * The `listingId` is encoded into the m.me ref parameter; Meta delivers this
+ * via the `referral` field in the first inbound webhook event so we can attribute
+ * the conversation to the correct listing.
+ */
+export async function createMessengerAd(
+  options: CreateMessengerAdOptions
+): Promise<ListingAdResult> {
+  if (!pageId) {
+    throw new Error("FACEBOOK_PAGE_ID is required");
+  }
+  const ref = `listing_${options.listingId}`;
+
+  return createAdInternal({
+    adType: "MESSENGER",
+    baseOptions: options,
+    linkData: {
+      message: options.adCopy ?? defaultAdCopy(options.listingTitle, options.city, options.state),
+      link: `https://m.me/${pageId}?ref=${encodeURIComponent(ref)}`,
+      picture: options.imageUrl,
+      call_to_action: {
+        type: "MESSAGE_PAGE",
+        value: {
+          app_destination: "MESSENGER",
+          page: pageId,
+          ref,
+        },
+      },
+    },
+    destinationMessenger: true,
+  });
+}
+
+function defaultAdCopy(title: string, city: string, state: string): string {
+  return `${title} — available now in ${city}, ${state}. Message us or tap to learn more.`;
+}
+
+type LinkDataCallToAction =
+  | { type: "LEARN_MORE" }
+  | {
+      type: "MESSAGE_PAGE";
+      value: { app_destination: "MESSENGER"; page: string; ref?: string };
+    };
+
+interface LinkData {
+  message: string;
+  link: string;
+  picture?: string;
+  call_to_action: LinkDataCallToAction;
+}
+
+async function createAdInternal(args: {
+  adType: AdType;
+  baseOptions: BaseAdOptions;
+  linkData: LinkData;
+  destinationMessenger?: boolean;
+}): Promise<ListingAdResult> {
+  const { adType, baseOptions, linkData, destinationMessenger } = args;
+  const {
+    listingTitle,
+    city,
+    state,
+    dailyBudgetDollars = 10,
+    durationDays = 7,
+    startPaused = true,
+  } = baseOptions;
+
+  if (!pageAccessToken || !adAccountId || !pageId) {
     throw new Error(
-      "FACEBOOK_PAGE_ACCESS_TOKEN and FACEBOOK_AD_ACCOUNT_ID are required"
+      "FACEBOOK_PAGE_ACCESS_TOKEN, FACEBOOK_AD_ACCOUNT_ID, and FACEBOOK_PAGE_ID are required"
     );
   }
 
   const campaignStatus = startPaused ? "PAUSED" : "ACTIVE";
-  // Budget is in cents
   const dailyBudgetCents = Math.round(dailyBudgetDollars * 100);
-
-  // Track created objects for cleanup on partial failure
   const createdIds: { campaignId?: string; adSetId?: string; creativeId?: string } = {};
 
   let campaignId: string;
@@ -666,10 +772,11 @@ export async function createListingAd({
   let adId: string;
 
   try {
-    // 1. Create Campaign with HOUSING special ad category
+    // 1. Campaign. Messenger ads use ENGAGEMENT objective (conversations);
+    //    Marketplace-link ads use AWARENESS (reach + clicks).
     const campaignRes = await graphPost(`${adAccountId}/campaigns`, {
-      name: `Listing: ${listingTitle}`,
-      objective: "OUTCOME_AWARENESS",
+      name: `Listing (${adType}): ${listingTitle}`,
+      objective: destinationMessenger ? "OUTCOME_ENGAGEMENT" : "OUTCOME_AWARENESS",
       special_ad_categories: JSON.stringify(["HOUSING"]),
       special_ad_category_country: JSON.stringify(["US"]),
       status: campaignStatus,
@@ -677,7 +784,8 @@ export async function createListingAd({
     campaignId = campaignRes.id;
     createdIds.campaignId = campaignId;
 
-    // 2. Create Ad Set with housing-compliant targeting
+    // 2. Ad Set. Housing-compliant targeting. Messenger ads optimize for
+    //    CONVERSATIONS and set destination_type so taps open Messenger.
     const now = new Date();
     const endTime = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
@@ -691,47 +799,55 @@ export async function createListingAd({
           },
         ],
       },
-      // Housing ads: age must be 18-65+, gender must be all
       age_min: 18,
       age_max: 65,
     };
 
-    const adSetRes = await graphPost(`${adAccountId}/adsets`, {
-      name: `${listingTitle} — ${city} area`,
+    const adSetParams: Record<string, string> = {
+      name: `${listingTitle} — ${city} area (${adType})`,
       campaign_id: campaignId,
       daily_budget: dailyBudgetCents.toString(),
       start_time: now.toISOString(),
       end_time: endTime.toISOString(),
       billing_event: "IMPRESSIONS",
-      optimization_goal: "REACH",
+      optimization_goal: destinationMessenger ? "CONVERSATIONS" : "REACH",
       bid_strategy: "LOWEST_COST_WITHOUT_CAP",
       targeting: JSON.stringify(targeting),
-      // Restrict to Facebook only — no Instagram (avoids needing a linked IG account)
       publisher_platforms: JSON.stringify(["facebook"]),
       facebook_positions: JSON.stringify(["feed", "marketplace"]),
       status: campaignStatus,
-    });
+    };
+
+    if (destinationMessenger) {
+      adSetParams.destination_type = "MESSENGER";
+    }
+
+    const adSetRes = await graphPost(`${adAccountId}/adsets`, adSetParams);
     adSetId = adSetRes.id;
     createdIds.adSetId = adSetId;
 
-    // 3. Create Ad Creative using the existing page post
+    // 3. Ad Creative. Uses object_story_spec.link_data so we control the CTA.
+    const objectStorySpec = {
+      page_id: pageId,
+      link_data: linkData,
+    };
+
     const creativeRes = await graphPost(`${adAccountId}/adcreatives`, {
-      name: `Creative: ${listingTitle}`,
-      object_story_id: postId,
+      name: `Creative (${adType}): ${listingTitle}`,
+      object_story_spec: JSON.stringify(objectStorySpec),
     });
     adCreativeId = creativeRes.id;
     createdIds.creativeId = adCreativeId;
 
-    // 4. Create the Ad
+    // 4. Ad.
     const adRes = await graphPost(`${adAccountId}/ads`, {
-      name: `Ad: ${listingTitle}`,
+      name: `Ad (${adType}): ${listingTitle}`,
       adset_id: adSetId,
       creative: JSON.stringify({ creative_id: adCreativeId }),
       status: campaignStatus,
     });
     adId = adRes.id;
   } catch (err) {
-    // Clean up any partially created objects
     for (const id of [createdIds.creativeId, createdIds.adSetId, createdIds.campaignId]) {
       if (id) {
         try {
@@ -744,16 +860,15 @@ export async function createListingAd({
     throw err;
   }
 
-  // Log the ad creation
   await logSystemEvent({
     action: "FACEBOOK_AD_CREATED",
-    description: `Created Marketplace ad for "${listingTitle}" — $${dailyBudgetDollars}/day for ${durationDays} days`,
+    description: `Created ${adType} ad for "${listingTitle}" — $${dailyBudgetDollars}/day for ${durationDays} days`,
     metadata: {
+      adType,
       campaignId,
       adSetId,
       adCreativeId,
       adId,
-      postId,
       city,
       state,
       dailyBudgetDollars,
@@ -770,6 +885,7 @@ export async function createListingAd({
     dailyBudget: dailyBudgetDollars,
     durationDays,
     status: campaignStatus,
+    adType,
   };
 }
 

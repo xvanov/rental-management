@@ -2,7 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthContext, orgScope } from "@/lib/auth-context";
 import { logSystemEvent } from "@/lib/events";
-import { createListingPost, createListingAd, isAdsConfigured } from "@/lib/integrations/facebook";
+import {
+  createListingPost,
+  createMarketplaceLinkAd,
+  createMessengerAd,
+  isAdsConfigured,
+  type AdType,
+  type ListingAdResult,
+} from "@/lib/integrations/facebook";
+
+interface AdOptions {
+  dailyBudget: number;
+  days: number;
+  startPaused?: boolean;
+  adType?: AdType; // default MESSENGER (higher conversion)
+  marketplaceUrl?: string; // required when adType === "MARKETPLACE_LINK"
+}
 
 export async function POST(
   request: NextRequest,
@@ -16,7 +31,7 @@ export async function POST(
     const body = await request.json();
     const { platforms, adOptions } = body as {
       platforms: string[];
-      adOptions?: { dailyBudget: number; days: number; startPaused?: boolean };
+      adOptions?: AdOptions;
     };
 
     if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
@@ -26,7 +41,6 @@ export async function POST(
       );
     }
 
-    // Fetch listing with property, verify org ownership
     const listing = await prisma.listing.findFirst({
       where: { id, ...orgScope.listing(ctx.organizationId) },
       include: { property: true },
@@ -40,19 +54,23 @@ export async function POST(
 
     const platformEntries: Array<Record<string, unknown>> = [];
     let facebookPostId: string | undefined;
-    let adCampaignId: string | undefined;
+    let adResult: ListingAdResult | undefined;
     let adBudget: number | undefined;
     let adDurationDays: number | undefined;
+    let adType: AdType | undefined;
+    let marketplaceUrl: string | undefined;
 
     for (const platform of platforms) {
       if (platform === "FACEBOOK") {
-        // Convert relative photo paths to absolute public URLs for Facebook
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "http://localhost:3000";
+        const baseUrl =
+          process.env.NEXT_PUBLIC_APP_URL ||
+          process.env.AUTH_URL ||
+          "http://localhost:3000";
         const photos = ((listing.photos as string[]) ?? []).map((p) =>
           p.startsWith("http") ? p : `${baseUrl}${p.startsWith("/") ? "" : "/"}${p}`
         );
 
-        const result = await createListingPost({
+        const postResult = await createListingPost({
           title: listing.title,
           description: listing.description,
           price: listing.price,
@@ -64,36 +82,63 @@ export async function POST(
           },
         });
 
-        facebookPostId = result.postId;
+        facebookPostId = postResult.postId;
 
         if (adOptions && adOptions.dailyBudget > 0 && isAdsConfigured()) {
-          const adResult = await createListingAd({
-            postId: result.postId,
+          const resolvedAdType: AdType = adOptions.adType ?? "MESSENGER";
+          const baseAdArgs = {
             listingTitle: listing.title,
             city: listing.property.city,
             state: listing.property.state,
             dailyBudgetDollars: adOptions.dailyBudget,
             durationDays: adOptions.days,
             startPaused: adOptions.startPaused ?? false,
-          });
-          adCampaignId = adResult.campaignId;
+            imageUrl: photos[0],
+            adCopy: `${listing.title} — $${listing.price}/mo in ${listing.property.city}, ${listing.property.state}. ${listing.description.slice(0, 180)}`,
+          };
+
+          if (resolvedAdType === "MARKETPLACE_LINK") {
+            if (!adOptions.marketplaceUrl) {
+              return NextResponse.json(
+                {
+                  error:
+                    "marketplaceUrl is required when adType is MARKETPLACE_LINK. Post to Facebook Marketplace manually from a personal profile first, then paste the item URL.",
+                },
+                { status: 400 }
+              );
+            }
+            adResult = await createMarketplaceLinkAd({
+              ...baseAdArgs,
+              marketplaceUrl: adOptions.marketplaceUrl,
+            });
+            marketplaceUrl = adOptions.marketplaceUrl;
+          } else {
+            adResult = await createMessengerAd({
+              ...baseAdArgs,
+              listingId: listing.id,
+            });
+          }
+
+          adType = resolvedAdType;
           adBudget = adOptions.dailyBudget;
           adDurationDays = adOptions.days;
 
           platformEntries.push({
             platform: "FACEBOOK",
-            externalId: result.postId,
+            externalId: postResult.postId,
             postedAt: new Date().toISOString(),
             status: "POSTED",
+            adType: resolvedAdType,
             adCampaignId: adResult.campaignId,
             adStatus: adOptions.startPaused ? "PAUSED" : "ACTIVE",
             adBudget: adOptions.dailyBudget,
             adDays: adOptions.days,
+            marketplaceUrl: marketplaceUrl ?? null,
           });
         } else {
           platformEntries.push({
             platform: "FACEBOOK",
-            externalId: result.postId,
+            externalId: postResult.postId,
             postedAt: new Date().toISOString(),
             status: "POSTED",
           });
@@ -114,9 +159,11 @@ export async function POST(
         postedAt: new Date(),
         platforms: platformEntries as unknown as import("@/generated/prisma/client").Prisma.InputJsonValue,
         ...(facebookPostId ? { facebookPostId } : {}),
-        ...(adCampaignId ? { adCampaignId } : {}),
+        ...(adResult ? { adCampaignId: adResult.campaignId } : {}),
         ...(adBudget ? { adBudget } : {}),
         ...(adDurationDays ? { adDurationDays } : {}),
+        ...(adType ? { adType } : {}),
+        ...(marketplaceUrl ? { marketplaceUrl } : {}),
       },
       include: {
         property: { select: { id: true, address: true, city: true, state: true } },
@@ -127,8 +174,17 @@ export async function POST(
     await logSystemEvent(
       {
         action: "LISTING_PUBLISHED",
-        description: `Published listing "${listing.title}" to ${platforms.join(", ")}${adCampaignId ? ` with $${adBudget}/day ad for ${adDurationDays} days` : ""}`,
-        metadata: { listingId: id, platforms, facebookPostId, adCampaignId, adBudget, adDurationDays },
+        description: `Published listing "${listing.title}" to ${platforms.join(", ")}${adResult ? ` with ${adType} ad ($${adBudget}/day for ${adDurationDays} days)` : ""}`,
+        metadata: {
+          listingId: id,
+          platforms,
+          facebookPostId,
+          adCampaignId: adResult?.campaignId,
+          adType,
+          adBudget,
+          adDurationDays,
+          marketplaceUrl,
+        },
       },
       { propertyId: listing.propertyId }
     );
@@ -137,7 +193,7 @@ export async function POST(
   } catch (error) {
     console.error("Failed to publish listing:", error);
     return NextResponse.json(
-      { error: "Failed to publish listing" },
+      { error: error instanceof Error ? error.message : "Failed to publish listing" },
       { status: 500 }
     );
   }
